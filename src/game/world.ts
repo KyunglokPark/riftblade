@@ -209,6 +209,8 @@ export class World implements Arena {
       for (const e of this.enemies) {
         if (e.dead) continue;
         if (!this.inRange(a, e)) continue;
+        // 패링: 적이 공격 직전(예비 후반)~공격 중일 때 검이 닿으면 튕겨낸다
+        if (e instanceof Enemy && this.tryParry(a, e)) continue;
         const wasAlive = !e.dead;
         if (e.hurt(a, p.x, this)) {
           this.onPlayerLand(a, e);
@@ -233,6 +235,43 @@ export class World implements Arena {
     const amin = a.airMin ?? -20;
     const amax = a.airMax ?? 60;
     return f.air >= amin && f.air <= amax;
+  }
+
+  /**
+   * 패링 판정·처리. 적의 공격 타이밍(예비 55% 이후~타격 중)에 플레이어의 참격이 닿으면:
+   * 적의 공격을 취소하고 뒤로 밀어내며 잠시 스턴. 데미지 대신 확실한 반격 기회를 준다.
+   */
+  private tryParry(a: ActiveAttack, e: Enemy): boolean {
+    if (e.hitBy.has(a.hitId)) return false;
+    const anim = e.attackAnim();
+    if (!anim) return false;
+    if (anim.phase !== "strike" && anim.prog < 0.55) return false;
+
+    e.hitBy.add(a.hitId); // 같은 스윙으로 중복 패링 방지
+    const dir = e.x >= this.player.x ? 1 : -1;
+    const boss = e.kind === "boss";
+    e.active = null; // 적의 이번 공격은 무효
+    e.telegraph = 0;
+    e.state = "hurt";
+    e.t = 0;
+    e.hitstun = boss ? 36 : 60; // 스턴 — 반격 콤보 넣을 시간
+    e.vx = (dir * (boss ? 14 : 22)) / e.weight; // 뒤로 밀려남
+    e.vz = 0;
+    e.flash = 8;
+    e.facing = -dir;
+
+    // 보상: MP 소량 회복
+    this.player.mp = Math.min(this.player.maxMp, this.player.mp + 8);
+
+    const gy = groundY(e.z) - 34;
+    const mx = (this.player.x + e.x) / 2;
+    this.particles.spark(mx, gy, 16, "#ffe08a", 9);
+    this.particles.glow(mx, gy, "rgba(255,224,138,0.6)", 40, 10);
+    this.particles.text(mx, gy - 14, "PARRY!", "#ffe08a", 1.4);
+    this.freeze(9);
+    this.cam.shake(9);
+    sfx.heavy();
+    return true;
   }
 
   private onPlayerLand(a: ActiveAttack, e: Fighter) {

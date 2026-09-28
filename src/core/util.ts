@@ -6,7 +6,8 @@ export const VH = 540;
 // 벨트스크롤 깊이(z) 설정: z=0 앞(아래), z=ZMAX 뒤(위)
 export const ZMAX = 150;
 export const GROUND_FRONT = 508; // z=0 일 때 바닥 화면 y
-export const GROUND_BACK = 372; // z=ZMAX 일 때 바닥 화면 y
+export const GROUND_BACK = 372; // 배경 지평선(바닥 시작) 화면 y — 배경 렌더 기준
+export const WALK_BACK = 428; // z=ZMAX 일 때 발 화면 y — 기둥 받침 아래까지만 걸을 수 있음
 export const STAGE_LEN = 2600; // 월드 x 길이
 
 export function clamp(v: number, lo: number, hi: number): number {
@@ -33,13 +34,13 @@ export function approach(v: number, target: number, step: number): number {
   return v;
 }
 
-/** z(깊이) → 바닥 화면 y */
+/** z(깊이) → 바닥 화면 y (걸을 수 있는 밴드: GROUND_FRONT~WALK_BACK) */
 export function groundY(z: number): number {
-  return lerp(GROUND_FRONT, GROUND_BACK, clamp(z, 0, ZMAX) / ZMAX);
+  return lerp(GROUND_FRONT, WALK_BACK, clamp(z, 0, ZMAX) / ZMAX);
 }
-/** z(깊이) → 원근 스케일 */
+/** z(깊이) → 원근 스케일 (걷기 밴드가 좁아진 만큼 축소 폭도 완만하게) */
 export function depthScale(z: number): number {
-  return lerp(1.0, 0.78, clamp(z, 0, ZMAX) / ZMAX);
+  return lerp(1.0, 0.85, clamp(z, 0, ZMAX) / ZMAX);
 }
 
 /** 벨트스크롤 히트 판정: x 간격 + z 간격 이내 */

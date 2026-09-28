@@ -164,6 +164,13 @@ export class Enemy extends Fighter {
               "#ff8f8f",
               this.kind === "boss" ? 1.6 : 0.85
             );
+            if (this.kind === "boss") {
+              // 대검 내려찍기 — 바닥 충격파
+              const ix = this.x + this.facing * 46;
+              arena.cam.shake(12);
+              arena.particles.spark(ix, groundY(this.z) + 2, 14, "#ff8f8f", 9);
+              arena.particles.glow(ix, groundY(this.z) - 6, "rgba(255,90,90,0.5)", 46, 10);
+            }
           }
         }
         break;
@@ -253,6 +260,22 @@ export class Enemy extends Fighter {
     if (this.kind === "boss") {
       // 착지 여파
     }
+  }
+
+  /** 렌더용: 공격 모션 진행도 — windup/strike 단계와 0..1 진행률. 공격 중이 아니면 null */
+  attackAnim(): { phase: "windup" | "strike"; prog: number } | null {
+    if (this.state === "windup") {
+      const w = this.kind === "charger" ? this.spec.windup : this.spec.windup * (this.phase2 ? 0.7 : 1);
+      return { phase: "windup", prog: clamp(this.t / w, 0, 1) };
+    }
+    if (this.state === "attack" || this.state === "dashatk") {
+      return { phase: "strike", prog: clamp(this.t / (this.spec.active + 2), 0, 1) };
+    }
+    // 술사는 예비 끝에 볼트를 던지고 바로 recover로 가므로, 투척 동작은 recover 초반에 재생
+    if (this.kind === "caster" && this.state === "recover" && this.t < 14) {
+      return { phase: "strike", prog: clamp(this.t / 14, 0, 1) };
+    }
+    return null;
   }
 
   render_shadowScale() {

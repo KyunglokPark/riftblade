@@ -47,6 +47,14 @@ const heroWalk = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => loadSpr(`/sprites/hero_walk
 // 공격 키포즈 (Create State, 88x88 — 발 75행, 중심 40열). 예비→타격 전환 + 코드 연출로 휘두름을 합성
 const heroAtkWindup = loadSpr("/sprites/hero_atk_windup.png");
 const heroAtkStrike = loadSpr("/sprites/hero_atk_strike.png");
+// 점프 프레임 (88 캔버스, 수직 속도에 매핑: 도약→상승→정점→하강). 프레임별 발/중심 앵커
+const heroJump = [0, 1, 2, 3].map((i) => loadSpr(`/sprites/hero_jump_${i}.png`));
+const HERO_JUMP_ANCHOR = [
+  { cx: 43, foot: 70 },
+  { cx: 39, foot: 52 },
+  { cx: 42, foot: 54 },
+  { cx: 44, foot: 75 },
+];
 const enemySpr: Record<string, Spr> = {
   grunt: loadSpr("/sprites/grunt.png"),
   charger: loadSpr("/sprites/charger.png"),
@@ -70,6 +78,45 @@ const ENEMY_WALK_ANCHOR: Record<string, { cx: number; foot: number; size: number
   boss: { cx: 47, foot: 74, size: 88 },
 };
 const ENEMY_WALK_PHASE = 1.5; // walkPhase(틱당 0.25)당 프레임 진행 → 약 10fps
+// 적 공격 프레임 (Pixellab 템플릿): frames 앞쪽 windup개는 예비, 나머지는 타격.
+// cx/foot/size는 캔버스별 실측 앵커.
+interface EnemyAtkCfg {
+  frames: Spr[];
+  windup: number;
+  size: number;
+  anchors: { cx: number; foot: number }[]; // 프레임별 앵커 (길이 1이면 전 프레임 공통)
+}
+const ENEMY_ATK: Record<string, EnemyAtkCfg> = {
+  grunt: {
+    frames: [0, 1, 2, 3, 4, 5].map((i) => loadSpr(`/sprites/grunt_atk_${i}.png`)),
+    windup: 5,
+    size: 64,
+    anchors: [{ cx: 32, foot: 62 }],
+  },
+  charger: {
+    frames: [0, 1, 2, 3, 4, 5].map((i) => loadSpr(`/sprites/charger_atk_${i}.png`)),
+    windup: 5,
+    size: 88,
+    anchors: [{ cx: 44, foot: 74 }],
+  },
+  caster: {
+    // 0~2 오브 충전(예비), 3~6 투척+복귀 (볼트 발사 직후 recover 초반에 재생)
+    frames: [0, 1, 2, 3, 4, 5, 6].map((i) => loadSpr(`/sprites/caster_atk_${i}.png`)),
+    windup: 3,
+    size: 84,
+    anchors: [{ cx: 38, foot: 70 }],
+  },
+  boss: {
+    // Create State 키포즈 2장: 0 대검 치켜들기(예비), 1 내려찍기(타격, 웅크려서 발이 낮음)
+    frames: [0, 1].map((i) => loadSpr(`/sprites/boss_atk_${i}.png`)),
+    windup: 1,
+    size: 96,
+    anchors: [
+      { cx: 48, foot: 78 },
+      { cx: 54, foot: 88 },
+    ],
+  },
+};
 
 function capsule(
   ctx: CanvasRenderingContext2D,
@@ -294,9 +341,12 @@ function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, camX: number) {
       lean = f * 0.14;
     }
   } else if (p.airborne) {
-    const up = p.vair > 0;
-    sys = up ? 1.12 : 0.94;
-    sxs = up ? 0.9 : 1.06;
+    // 점프 프레임이 준비되면 프레임이 자세를 표현 (스쿼시 없음)
+    if (!(st === "air" && heroJump[0].ready)) {
+      const up = p.vair > 0;
+      sys = up ? 1.12 : 0.94;
+      sxs = up ? 0.9 : 1.06;
+    }
   } else if (st === "skill1") {
     lean = f * 0.22;
   } else if (st === "skill3") {
@@ -369,6 +419,16 @@ function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, camX: number) {
   } else if (atkReady) {
     // 공격 키포즈 (88x88 — 발 75행, 중심 40열)
     ctx.drawImage(flash && atkPose!.white ? atkPose!.white : atkPose!.img, -40, -75, 88, 88);
+  } else if (st === "air" && heroJump[0].ready) {
+    // 점프: 수직 속도로 도약/상승/정점/하강 프레임 선택
+    const ji = p.vair > 7 ? 0 : p.vair > 2 ? 1 : p.vair > -3 ? 2 : 3;
+    const jf = heroJump[ji];
+    const ja = HERO_JUMP_ANCHOR[ji];
+    if (jf.ready) {
+      ctx.drawImage(flash && jf.white ? jf.white : jf.img, -ja.cx, -ja.foot, 88, 88);
+    } else {
+      ctx.drawImage(img, -32, -62, 64, 64);
+    }
   } else if (idleFrame && idleFrame.ready) {
     ctx.drawImage(flash && idleFrame.white ? idleFrame.white : idleFrame.img, -32, -62, 64, 64);
   } else if (breathing) {
@@ -556,14 +616,37 @@ function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy, camX: number) {
   let lean = 0;
   const inAttack = e.state === "windup" || e.state === "attack" || e.state === "dashatk";
   const lunging = (e.state === "attack" || e.state === "dashatk") && e.kind !== "caster";
-  // 이동 중이면 걷기 프레임 (프레임이 걸음을 표현하므로 스쿼시 없음)
+  // 공격 프레임 애니메이션 (설정된 적만): windup 진행에 따라 예비 프레임, 타격 구간은 나머지 프레임
+  const atkCfg = ENEMY_ATK[e.kind];
+  const anim = atkCfg ? e.attackAnim() : null;
+  let afIdx = 0;
+  if (atkCfg && anim) {
+    if (anim.phase === "windup") {
+      afIdx = Math.min(atkCfg.windup - 1, Math.floor(anim.prog * atkCfg.windup));
+    } else {
+      const n = atkCfg.frames.length - atkCfg.windup;
+      afIdx = atkCfg.windup + Math.min(n - 1, Math.floor(anim.prog * n));
+    }
+  }
+  const afRaw = atkCfg && anim ? atkCfg.frames[afIdx] : null;
+  const attackFrame = afRaw !== null && afRaw.ready ? afRaw : null;
+  const afAnchor = atkCfg ? atkCfg.anchors[Math.min(afIdx, atkCfg.anchors.length - 1)] : null;
+  // 이동 중이면 걷기 프레임 — 단, 공격 프레임이 재생 중일 땐(술사의 recover 투척 등) 걷기보다 우선
   const moving = e.air === 0 && (Math.abs(e.vx) > 0.1 || Math.abs(e.vz) > 0.1);
   const wfArr = enemyWalk[e.kind];
   const wf =
-    !inAttack && moving && wfArr ? wfArr[Math.floor(e.walkPhase / ENEMY_WALK_PHASE) % wfArr.length] : null;
+    !inAttack && !attackFrame && moving && wfArr
+      ? wfArr[Math.floor(e.walkPhase / ENEMY_WALK_PHASE) % wfArr.length]
+      : null;
   const walking = wf !== null && wf.ready;
   if (inAttack) {
-    if (e.kind === "caster") {
+    if (attackFrame) {
+      // 프레임이 모션을 표현 — 타격/돌진 순간에만 살짝 내지르는 보정
+      if (e.state === "attack" || e.state === "dashatk") {
+        lean = f * 0.12;
+        sxs = 1.06;
+      }
+    } else if (e.kind === "caster") {
       // 시전: 맥동하며 부풀어오름
       const c = Math.sin(e.t * 0.35);
       sys = 1 + c * 0.05;
@@ -594,13 +677,20 @@ function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy, camX: number) {
   if (lunging && spr.ready) {
     // 내지르는 순간 잔상
     ctx.globalAlpha = 0.2;
-    ctx.drawImage(spr.img, -32 - 9, -62, 64, 64);
+    if (attackFrame && atkCfg && afAnchor) {
+      ctx.drawImage(attackFrame.img, -afAnchor.cx - 9, -afAnchor.foot, atkCfg.size, atkCfg.size);
+    } else {
+      ctx.drawImage(spr.img, -32 - 9, -62, 64, 64);
+    }
     ctx.globalAlpha = 1;
   }
   if (walking) {
     const a = ENEMY_WALK_ANCHOR[e.kind];
     const img = flashNow && wf!.white ? wf!.white : wf!.img;
     ctx.drawImage(img, -a.cx, -a.foot, a.size, a.size);
+  } else if (attackFrame && atkCfg && afAnchor) {
+    const img = flashNow && attackFrame.white ? attackFrame.white : attackFrame.img;
+    ctx.drawImage(img, -afAnchor.cx, -afAnchor.foot, atkCfg.size, atkCfg.size);
   } else {
     const img = flashNow && spr.white ? spr.white : spr.img;
     ctx.drawImage(img, -32, -62, 64, 64);
