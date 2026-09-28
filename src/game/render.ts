@@ -340,6 +340,15 @@ function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, camX: number) {
     } else {
       lean = f * 0.14;
     }
+  } else if (st === "skill2") {
+    // 천공참: 급강하 시 앞으로 깊이 기울고, 내려찍은 순간은 낮게 뻗는다
+    if (p.slammedFlag()) {
+      lean = f * 0.3;
+      sxs = 1.1;
+      sys = 0.94;
+    } else if (p.vair < -4) {
+      lean = f * 0.45;
+    }
   } else if (p.airborne) {
     // 점프 프레임이 준비되면 프레임이 자세를 표현 (스쿼시 없음)
     if (!(st === "air" && heroJump[0].ready)) {
@@ -347,10 +356,26 @@ function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, camX: number) {
       sys = up ? 1.12 : 0.94;
       sxs = up ? 0.9 : 1.06;
     }
+  } else if (st === "dash") {
+    // 대시: 낮게 숙이고 앞으로 쭉 뻗는 질주 자세
+    lean = f * 0.34;
+    sxs = 1.15;
+    sys = 0.9;
   } else if (st === "skill1") {
     lean = f * 0.22;
   } else if (st === "skill3") {
-    sys = 1.06;
+    // 파열노바: 충전(웅크리며 응축·미세 떨림) → 폭발(위로 확 뻗음) → 잔여
+    if (t < 16) {
+      const c = t / 16;
+      sys = 1 - c * 0.08;
+      sxs = 1 + c * 0.05;
+      lean = Math.sin(t * 1.6) * 0.035;
+    } else if (t < 24) {
+      sys = 1.22 - (t - 16) * 0.015;
+      sxs = 0.92;
+    } else {
+      sys = 1.04;
+    }
   }
   // idle 숨쉬기: 스케일 펄스 대신 다리는 바닥에 고정하고 상체 행만 1px 오르내리는 픽셀 슬라이스
   const breathing = st === "idle" && !p.airborne;
@@ -394,9 +419,17 @@ function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, camX: number) {
       ctx.drawImage(atkPose!.img, -40 - 6, -75, 88, 88);
       ctx.globalAlpha = 1;
     } else {
+      // 대시: 질주 자세(최대 보폭 걷기 프레임)로 잔상 3장을 길게 끈다
+      const g = heroWalk[0].ready ? heroWalk[0].img : heroSpr.img;
+      const gx = heroWalk[0].ready ? -44 : -32;
+      const gy2 = heroWalk[0].ready ? -73 : -62;
+      const gs = heroWalk[0].ready ? 88 : 64;
+      ctx.globalAlpha = 0.1;
+      ctx.drawImage(g, gx - 26, gy2, gs, gs);
+      ctx.globalAlpha = 0.18;
+      ctx.drawImage(g, gx - 16, gy2, gs, gs);
       ctx.globalAlpha = 0.28;
-      ctx.drawImage(heroSpr.img, -32 - 10, -62, 64, 64);
-      ctx.drawImage(heroSpr.img, -32 - 5, -62, 64, 64);
+      ctx.drawImage(g, gx - 8, gy2, gs, gs);
       ctx.globalAlpha = 1;
     }
   }
@@ -419,6 +452,39 @@ function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, camX: number) {
   } else if (atkReady) {
     // 공격 키포즈 (88x88 — 발 75행, 중심 40열)
     ctx.drawImage(flash && atkPose!.white ? atkPose!.white : atkPose!.img, -40, -75, 88, 88);
+  } else if (st === "skill3" && heroAtkWindup.ready) {
+    // 파열노바: 칼을 치켜든 채널링 포즈. 폭발 순간(t 16~19)은 백색 섬광
+    const wp = heroAtkWindup;
+    const burstFlash = t >= 16 && t < 20 && wp.white !== null;
+    const img3 = burstFlash || (flash && wp.white) ? wp.white! : wp.img;
+    ctx.drawImage(img3, -40, -75, 88, 88);
+  } else if (st === "skill2" && heroJump[0].ready) {
+    // 천공참: 상승/정점은 점프 프레임, 급강하는 하강 프레임 + 세로 잔상, 착지는 타격 포즈
+    if (p.slammedFlag() && heroAtkStrike.ready) {
+      const sp = heroAtkStrike;
+      ctx.drawImage(flash && sp.white ? sp.white : sp.img, -40, -75, 88, 88);
+    } else {
+      const ji = p.vair > 7 ? 0 : p.vair > 2 ? 1 : p.vair > -3 ? 2 : 3;
+      const jf = heroJump[ji];
+      const ja = HERO_JUMP_ANCHOR[ji];
+      if (ji === 3 && p.vair < -6 && jf.ready) {
+        // 급강하 잔상 (지나온 위쪽으로)
+        ctx.globalAlpha = 0.14;
+        ctx.drawImage(jf.img, -ja.cx, -ja.foot - 22, 88, 88);
+        ctx.globalAlpha = 0.26;
+        ctx.drawImage(jf.img, -ja.cx, -ja.foot - 11, 88, 88);
+        ctx.globalAlpha = 1;
+      }
+      if (jf.ready) {
+        ctx.drawImage(flash && jf.white ? jf.white : jf.img, -ja.cx, -ja.foot, 88, 88);
+      } else {
+        ctx.drawImage(img, -32, -62, 64, 64);
+      }
+    }
+  } else if (st === "dash" && heroWalk[0].ready) {
+    // 대시 본체도 질주 자세 프레임으로
+    const dw = heroWalk[0];
+    ctx.drawImage(flash && dw.white ? dw.white : dw.img, -44, -73, 88, 88);
   } else if (st === "air" && heroJump[0].ready) {
     // 점프: 수직 속도로 도약/상승/정점/하강 프레임 선택
     const ji = p.vair > 7 ? 0 : p.vair > 2 ? 1 : p.vair > -3 ? 2 : 3;

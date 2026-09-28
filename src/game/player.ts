@@ -191,7 +191,7 @@ export class Player extends Fighter {
         this.updateMelee(arena);
         break;
       case "dash":
-        this.updateDash();
+        this.updateDash(arena);
         break;
       case "skill1":
         this.updateSkill1(arena);
@@ -237,7 +237,7 @@ export class Player extends Fighter {
     if (!air && this.cd3 <= 0 && this.mp >= 42 && this.takeS3()) return this.startSkill3(arena);
     if (this.cd2 <= 0 && this.mp >= 30 && this.takeS2()) return this.startSkill2(arena);
     if (this.cd1 <= 0 && this.mp >= 22 && this.takeS1()) return this.startSkill1(arena);
-    if (!air && this.takeDash()) return this.startDash();
+    if (!air && this.takeDash()) return this.startDash(arena);
     if (!air && this.takeJump()) {
       this.vair = 13.5;
       this.air = 1;
@@ -289,7 +289,7 @@ export class Player extends Fighter {
       if (this.cd1 <= 0 && this.mp >= 22 && this.takeS1()) return this.startSkill1(arena);
       if (this.cd2 <= 0 && this.mp >= 30 && this.takeS2()) return this.startSkill2(arena);
       if (this.cd3 <= 0 && this.mp >= 42 && !this.airborne && this.takeS3()) return this.startSkill3(arena);
-      if (!this.airborne && this.takeDash()) return this.startDash();
+      if (!this.airborne && this.takeDash()) return this.startDash(arena);
       if (!this.airborne && this.takeJump()) {
         this.vair = 13.5;
         this.air = 1;
@@ -321,18 +321,25 @@ export class Player extends Fighter {
   }
 
   // ---- 대시(무적) ----
-  private startDash() {
+  private startDash(arena: Arena) {
     this.state = "dash";
     this.t = 0;
     this.invuln = 16;
     this.vx = this.facing * 17;
     sfx.dash();
+    // 박차고 나가는 먼지·글로우
+    arena.particles.dust(this.x - this.facing * 12, groundY(this.z) - 4, 6);
+    arena.particles.glow(this.x, groundY(this.z) - 24, "rgba(120,220,255,0.35)", 30, 8);
   }
-  private updateDash() {
+  private updateDash(arena: Arena) {
     if (this.t < 13) {
       this.vx = this.facing * 17 * (1 - this.t / 26); // 더 멀리, 서서히 감속
     } else {
       this.vx *= 0.8;
+    }
+    // 질주 중 발밑 먼지 트레일
+    if (this.t < 14 && this.t % 3 === 0) {
+      arena.particles.dust(this.x - this.facing * 14, groundY(this.z) - 3, 1);
     }
     if (this.t >= 24) {
       this.state = "idle";
