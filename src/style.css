@@ -1,0 +1,36 @@
+:root {
+  color-scheme: dark;
+}
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+  background: #05060a;
+  overflow: hidden;
+  font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+}
+#wrap {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#game {
+  width: min(100vw, 177.78vh); /* keep 16:9 */
+  height: min(56.25vw, 100vh);
+  image-rendering: auto;
+  background: #05060a;
+  box-shadow: 0 0 60px rgba(80, 180, 255, 0.08);
+  cursor: none;
+}
+/* 마우스가 움직이는 동안만 커서 표시 — 어두운 화면에서 잘 보이는 시안 링 */
+body.show-cursor #game {
+  cursor: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"%3E%3Ccircle cx="12" cy="12" r="8" fill="none" stroke="%230a0e14" stroke-width="5"/%3E%3Ccircle cx="12" cy="12" r="8" fill="none" stroke="%235cf0ff" stroke-width="2.5"/%3E%3Ccircle cx="12" cy="12" r="2.2" fill="%23eaffff" stroke="%230a0e14" stroke-width="1"/%3E%3C/svg%3E')
+      12 12,
+    crosshair;
+}

@@ -1,0 +1,18 @@
+{
+  "name": "riftblade",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "RIFTBLADE — 파열검, 벨트스크롤 액션 (Vite + TS, Canvas)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "omggif": "^1.0.10",
+    "pngjs": "^7.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}
