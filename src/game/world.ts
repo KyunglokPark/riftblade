@@ -27,7 +27,12 @@ const WAVES: WaveDef[] = [
   { banner: "제 2 균열 · 돌격 선봉", list: [{ kind: "grunt", count: 3 }, { kind: "charger", count: 1 }] },
   { banner: "제 3 균열 · 저주술사", list: [{ kind: "grunt", count: 2 }, { kind: "caster", count: 2 }] },
   { banner: "제 4 균열 · 대공세", list: [{ kind: "charger", count: 2 }, { kind: "grunt", count: 2 }, { kind: "caster", count: 1 }] },
-  { banner: "최종 · 균열 감시자", list: [{ kind: "boss", count: 1 }, { kind: "grunt", count: 2 }] },
+  { banner: "제 5 균열 · 균열 폭주", list: [{ kind: "grunt", count: 4 }, { kind: "charger", count: 2 }] },
+  { banner: "제 6 균열 · 술사 결사대", list: [{ kind: "caster", count: 3 }, { kind: "grunt", count: 2 }] },
+  { banner: "제 7 균열 · 철갑 돌격대", list: [{ kind: "charger", count: 3 }, { kind: "caster", count: 1 }] },
+  { banner: "제 8 균열 · 그림자 군단", list: [{ kind: "grunt", count: 5 }, { kind: "charger", count: 1 }, { kind: "caster", count: 2 }] },
+  { banner: "제 9 균열 · 균열의 정예", list: [{ kind: "charger", count: 3 }, { kind: "caster", count: 3 }, { kind: "grunt", count: 2 }] },
+  { banner: "최종 균열 · 감시자 강림", list: [{ kind: "boss", count: 1 }, { kind: "grunt", count: 2 }] },
 ];
 
 export class World implements Arena {
@@ -80,13 +85,15 @@ export class World implements Arena {
   }
 
   private nextWave() {
-    if (this.wave >= WAVES.length) {
-      this.result = "win";
-      sfx.win();
-      return;
-    }
-    const def = WAVES[this.wave];
-    this.banner = `WAVE ${this.wave + 1} / ${WAVES.length} — ${def.banner}`;
+    // 무한 모드: 10웨이브가 한 주기. 11웨이브부터는 1웨이브 패턴이 더 강하게 반복된다.
+    const widx = this.wave % WAVES.length;
+    const cycle = Math.floor(this.wave / WAVES.length);
+    const def = WAVES[widx];
+    // 스케일링: 같은 몹이라도 뒤 웨이브일수록, 다음 주기일수록 강하다
+    const hpMul = (1 + 0.15 * widx) * (1 + 0.9 * cycle);
+    const dmgMul = (1 + 0.08 * widx) * (1 + 0.45 * cycle);
+    this.banner =
+      `WAVE ${this.wave + 1} — ${def.banner}` + (cycle > 0 ? ` · ${cycle + 1}주기` : "");
     this.bannerT = 150;
     let side = 1;
     for (const grp of def.list) {
@@ -96,7 +103,7 @@ export class World implements Arena {
         let x = clamp(px + side * off, 60, STAGE_LEN - 60);
         side *= -1;
         const z = rand(24, 140);
-        const e = new Enemy(grp.kind, x, z);
+        const e = new Enemy(grp.kind, x, z, hpMul, dmgMul);
         if (grp.kind === "boss") {
           e.x = clamp(px + (px < STAGE_LEN / 2 ? 420 : -420), 80, STAGE_LEN - 80);
           e.z = 80;
@@ -324,12 +331,12 @@ export class World implements Arena {
 
   private onEnemyDeath(e: Enemy) {
     e.playDeathFx(this);
-    this.addScore(e.spec.score);
+    this.addScore(Math.round(e.spec.score * e.powerMul));
     this.cam.shake(e.kind === "boss" ? 20 : 6);
     if (e.kind === "boss") {
+      // 주기 보스 격퇴 — 승리 종료 대신 연출 후 다음 주기로 계속
       this.slowmo(50, 0.4);
       this.freeze(16);
-      this.result = "win";
       sfx.win();
     }
   }

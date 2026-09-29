@@ -40,14 +40,18 @@ export class Enemy extends Fighter {
   private boltCd = 0;
   private phase2 = false;
   telegraph = 0; // 예고(0~1) — 렌더 플래시
+  dmgMul = 1; // 웨이브/주기 스케일링 — 데미지 배수
+  powerMul = 1; // 점수 보정용 (체력 배수와 동일)
   color: string;
   eye: string;
 
-  constructor(kind: EnemyKind, x: number, z: number) {
+  constructor(kind: EnemyKind, x: number, z: number, hpMul = 1, dmgMul = 1) {
     const s = SPECS[kind];
-    super("enemy", x, z, s.hp);
+    super("enemy", x, z, Math.round(s.hp * hpMul));
     this.kind = kind;
     this.spec = s;
+    this.dmgMul = dmgMul;
+    this.powerMul = hpMul;
     this.radius = s.radius;
     this.weight = s.weight;
     this.color = s.color;
@@ -84,7 +88,7 @@ export class Enemy extends Fighter {
       z: this.z,
       rx: this.spec.reach * 0.55 * reachMul,
       rz: 40,
-      dmg: this.spec.dmg,
+      dmg: Math.round(this.spec.dmg * this.dmgMul),
       kbx: this.spec.kbx,
       kbz: 0,
       launch: this.spec.launch,
@@ -146,7 +150,12 @@ export class Enemy extends Fighter {
               1.0
             );
           } else if (this.kind === "caster") {
-            arena.spawnBolt(this.x + this.facing * 18, this.z, this.facing * 6.2, this.spec.dmg);
+            arena.spawnBolt(
+              this.x + this.facing * 18,
+              this.z,
+              this.facing * 6.2,
+              Math.round(this.spec.dmg * this.dmgMul)
+            );
             sfx.skill();
             this.state = "recover";
             this.t = 0;

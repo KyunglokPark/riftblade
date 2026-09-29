@@ -91,10 +91,18 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: World) {
       ctx.fillStyle = "rgba(0,0,0,0.6)";
       ctx.fillRect(x, sy, 58, 54 * fr);
     }
-    ctx.fillStyle = ready ? "#dff9ff" : "rgba(200,220,240,0.5)";
     ctx.textAlign = "center";
-    ctx.font = "900 18px 'Segoe UI', sans-serif";
-    ctx.fillText(SKILLS[i].key, x + 29, sy + 24);
+    if (cds[i] > 0) {
+      // 쿨다운 중엔 키 대신 남은 시간(초) 표시
+      const sec = cds[i] / 60;
+      ctx.fillStyle = "#ffd76a";
+      ctx.font = "900 16px 'Segoe UI', sans-serif";
+      ctx.fillText(sec >= 10 ? `${Math.ceil(sec)}` : sec.toFixed(1), x + 29, sy + 24);
+    } else {
+      ctx.fillStyle = ready ? "#dff9ff" : "rgba(200,220,240,0.5)";
+      ctx.font = "900 18px 'Segoe UI', sans-serif";
+      ctx.fillText(SKILLS[i].key, x + 29, sy + 24);
+    }
     ctx.font = "600 10px 'Segoe UI', sans-serif";
     ctx.fillText(SKILLS[i].name, x + 29, sy + 40);
     ctx.font = "600 9px 'Segoe UI', sans-serif";
