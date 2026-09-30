@@ -14,6 +14,7 @@ interface Spr {
   ready: boolean;
   white: HTMLCanvasElement | null; // 피격 백색 실루엣
   red: HTMLCanvasElement | null; // 예고 붉은 실루엣
+  yellow: HTMLCanvasElement | null; // 엘리트(기습병) 테두리 실루엣
 }
 function tintCanvas(img: HTMLImageElement, color: string): HTMLCanvasElement {
   const c = document.createElement("canvas");
@@ -27,11 +28,12 @@ function tintCanvas(img: HTMLImageElement, color: string): HTMLCanvasElement {
   return c;
 }
 function loadSpr(src: string): Spr {
-  const s: Spr = { img: new Image(), ready: false, white: null, red: null };
+  const s: Spr = { img: new Image(), ready: false, white: null, red: null, yellow: null };
   s.img.onload = () => {
     s.ready = true;
     s.white = tintCanvas(s.img, "#eaffff");
     s.red = tintCanvas(s.img, "#ff6a6a");
+    s.yellow = tintCanvas(s.img, "#ffd76a");
   };
   s.img.src = src;
   return s;
@@ -60,14 +62,27 @@ const enemySpr: Record<string, Spr> = {
   charger: loadSpr("/sprites/charger.png"),
   caster: loadSpr("/sprites/caster.png"),
   boss: loadSpr("/sprites/boss.png"),
+  wolf: loadSpr("/sprites/wolf.png"),
+  guard: loadSpr("/sprites/guard.png"),
+  bomber: loadSpr("/sprites/bomber.png"),
+  lancer: loadSpr("/sprites/lancer.png"),
+  shaman: loadSpr("/sprites/shaman.png"),
 };
-const ENEMY_SCALE: Record<string, number> = { grunt: 1.0, charger: 1.18, caster: 1.02, boss: 2.6 };
+const ENEMY_SCALE: Record<string, number> = { grunt: 1.0, charger: 1.18, caster: 1.02, boss: 2.6, wolf: 1.0, guard: 1.15, bomber: 0.95, lancer: 1.05, shaman: 1.05 };
+// 정지 스프라이트(64캔버스)의 실측 앵커 — 종류별 발/중심이 달라 뜨거나 파묻히는 것 방지
+const ENEMY_STATIC_ANCHOR: Record<string, { cx: number; foot: number }> = {
+  guard: { cx: 33, foot: 61 },
+  bomber: { cx: 33, foot: 56 },
+  lancer: { cx: 27, foot: 63 },
+  shaman: { cx: 31, foot: 61 },
+};
 
 // 적 걷기 프레임 (Pixellab v3 walking). 캔버스가 88/84 혼재라 종류별 발/중심 앵커 사용.
+const ENEMY_WALK_COUNT: Record<string, number> = { grunt: 8, charger: 8, caster: 8, boss: 8, wolf: 4, guard: 8, lancer: 4, shaman: 4 };
 const enemyWalk: Record<string, Spr[]> = Object.fromEntries(
-  ["grunt", "charger", "caster", "boss"].map((k) => [
+  Object.keys(ENEMY_WALK_COUNT).map((k) => [
     k,
-    [0, 1, 2, 3, 4, 5, 6, 7].map((i) => loadSpr(`/sprites/${k}_walk_${i}.png`)),
+    Array.from({ length: ENEMY_WALK_COUNT[k] }, (_, i) => loadSpr(`/sprites/${k}_walk_${i}.png`)),
   ])
 );
 // cx: 몸 중심 열, foot: 발 행, size: 캔버스 크기 (gif2frames.cjs 바운딩박스 실측값)
@@ -76,6 +91,10 @@ const ENEMY_WALK_ANCHOR: Record<string, { cx: number; foot: number; size: number
   charger: { cx: 43, foot: 75, size: 88 },
   caster: { cx: 40, foot: 71, size: 84 },
   boss: { cx: 47, foot: 74, size: 88 },
+  wolf: { cx: 39, foot: 61, size: 88 },
+  guard: { cx: 49, foot: 76, size: 92 },
+  lancer: { cx: 32, foot: 63, size: 64 },
+  shaman: { cx: 31, foot: 60, size: 64 },
 };
 const ENEMY_WALK_PHASE = 1.5; // walkPhase(틱당 0.25)당 프레임 진행 → 약 10fps
 // 적 공격 프레임 (Pixellab 템플릿): frames 앞쪽 windup개는 예비, 나머지는 타격.
@@ -105,6 +124,27 @@ const ENEMY_ATK: Record<string, EnemyAtkCfg> = {
     windup: 3,
     size: 84,
     anchors: [{ cx: 38, foot: 70 }],
+  },
+  guard: {
+    // 방패 들고 메이스 후려치기: 0~2 움츠림(예비), 3~5 타격
+    frames: [0, 1, 2, 3, 4, 5].map((i) => loadSpr(`/sprites/guard_atk_${i}.png`)),
+    windup: 3,
+    size: 64,
+    anchors: [{ cx: 32, foot: 61 }],
+  },
+  lancer: {
+    // 창 찌르기: 0~1 당기기(예비), 2 긴 찌르기
+    frames: [0, 1, 2].map((i) => loadSpr(`/sprites/lancer_atk_${i}.png`)),
+    windup: 2,
+    size: 64,
+    anchors: [{ cx: 35, foot: 63 }],
+  },
+  shaman: {
+    // 치유 의식: 0~3 기 모으기(예비), 4~5 방출 (recover 초반 재생)
+    frames: [0, 1, 2, 3, 4, 5].map((i) => loadSpr(`/sprites/shaman_atk_${i}.png`)),
+    windup: 4,
+    size: 64,
+    anchors: [{ cx: 31, foot: 60 }],
   },
   boss: {
     // Create State 키포즈 2장: 0 대검 치켜들기(예비), 1 내려찍기(타격, 웅크려서 발이 낮음)
@@ -147,7 +187,7 @@ let bgMidReady = false;
 bgMid.onload = () => (bgMidReady = true);
 bgMid.src = "/sprites/bg_temple.png";
 
-export function drawBackground(ctx: CanvasRenderingContext2D, camX: number) {
+export function drawBackground(ctx: CanvasRenderingContext2D, camX: number, cycle = 0) {
   if (bgFarReady) {
     // 이미지 배경: 미러 타일링(홀수 타일 좌우 반전)으로 이음매 제거, 패럴럭스 0.22
     const off = camX * 0.22;
@@ -282,6 +322,16 @@ export function drawBackground(ctx: CanvasRenderingContext2D, camX: number) {
   // 바닥 균열 글로우
   ctx.fillStyle = "rgba(90,180,255,0.05)";
   ctx.fillRect(0, GROUND_FRONT - 6, VW, 6);
+
+  // 주기별 배경 무드: 2주기(웨이브 11~) 보랏빛 균열, 3주기(웨이브 21~)부터 핏빛.
+  // "color" 컴포지트 — 명암은 그대로 두고 색조만 물들인다.
+  if (cycle > 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = "color";
+    ctx.fillStyle = cycle === 1 ? "rgba(150,70,220,0.5)" : "rgba(225,45,45,0.55)";
+    ctx.fillRect(0, -60, VW, VH + 120); // 카메라 셰이크(translate) 여유분 포함
+    ctx.restore();
+  }
 }
 
 function shadow(ctx: CanvasRenderingContext2D, f: Fighter, camX: number) {
@@ -404,8 +454,20 @@ function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, camX: number) {
       : null;
   const atkReady = atkPose !== null && atkPose.ready;
 
+  // 사망: 흰 플리커(피격 flash) 후 등 뒤로 무너지듯 눕고 서서히 흐려진다
+  let deathAlpha = 1;
+  if (p.dead) {
+    const dp = Math.min(1, p.deathT / 44);
+    const ease = 1 - (1 - dp) * (1 - dp);
+    lean = -f * ease * 1.45; // 발을 축으로 뒤로 ~83도
+    sxs = 1;
+    sys = 1 - ease * 0.15;
+    deathAlpha = Math.max(0.55, 1 - Math.max(0, p.deathT - 20) * 0.004);
+  }
+
   ctx.save();
   ctx.translate(sx, gy);
+  if (deathAlpha < 1) ctx.globalAlpha = deathAlpha;
   ctx.rotate(lean);
   ctx.scale(f * S * sxs, S * sys);
   if (dashing) {
@@ -664,6 +726,25 @@ function drawArmAndSword(
   capsule(ctx, hx - 4 * f, hy - 3, hx + 4 * f, hy + 3, 3, "#9fe8ff");
 }
 
+/** 엘리트는 노란 실루엣을 상하좌우로 깔아 테두리처럼 보이게 한 뒤 본체를 그린다 */
+function drawOutlined(
+  ctx: CanvasRenderingContext2D,
+  spr: Spr,
+  img: CanvasImageSource,
+  elite: boolean,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+) {
+  if (elite && spr.yellow) {
+    for (const [ox, oy] of [[-2, 0], [2, 0], [0, -2], [0, 2]] as const) {
+      ctx.drawImage(spr.yellow, x + ox, y + oy, w, h);
+    }
+  }
+  ctx.drawImage(img, x, y, w, h);
+}
+
 function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy, camX: number) {
   const spr = enemySpr[e.kind];
   const sx = e.x - camX;
@@ -697,6 +778,9 @@ function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy, camX: number) {
   const afRaw = atkCfg && anim ? atkCfg.frames[afIdx] : null;
   const attackFrame = afRaw !== null && afRaw.ready ? afRaw : null;
   const afAnchor = atkCfg ? atkCfg.anchors[Math.min(afIdx, atkCfg.anchors.length - 1)] : null;
+  // 늑대 도약(dashatk): 질주 프레임 중 최대 신전 자세로 덮친다
+  const pounceRaw = e.kind === "wolf" && e.state === "dashatk" ? enemyWalk.wolf?.[3] ?? null : null;
+  const pounce = pounceRaw !== null && pounceRaw.ready ? pounceRaw : null;
   // 이동 중이면 걷기 프레임 — 단, 공격 프레임이 재생 중일 땐(술사의 recover 투척 등) 걷기보다 우선
   const moving = e.air === 0 && (Math.abs(e.vx) > 0.1 || Math.abs(e.vz) > 0.1);
   const wfArr = enemyWalk[e.kind];
@@ -753,13 +837,20 @@ function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy, camX: number) {
   if (walking) {
     const a = ENEMY_WALK_ANCHOR[e.kind];
     const img = flashNow && wf!.white ? wf!.white : wf!.img;
-    ctx.drawImage(img, -a.cx, -a.foot, a.size, a.size);
+    drawOutlined(ctx, wf!, img, e.elite, -a.cx, -a.foot, a.size, a.size);
+  } else if (pounce) {
+    const a = ENEMY_WALK_ANCHOR.wolf;
+    const img = flashNow && pounce.white ? pounce.white : pounce.img;
+    drawOutlined(ctx, pounce, img, e.elite, -a.cx, -a.foot, a.size, a.size);
   } else if (attackFrame && atkCfg && afAnchor) {
     const img = flashNow && attackFrame.white ? attackFrame.white : attackFrame.img;
-    ctx.drawImage(img, -afAnchor.cx, -afAnchor.foot, atkCfg.size, atkCfg.size);
+    drawOutlined(ctx, attackFrame, img, e.elite, -afAnchor.cx, -afAnchor.foot, atkCfg.size, atkCfg.size);
   } else {
-    const img = flashNow && spr.white ? spr.white : spr.img;
-    ctx.drawImage(img, -32, -62, 64, 64);
+    let img = flashNow && spr.white ? spr.white : spr.img;
+    // 자폭충 카운트다운: 붉게 점멸하며 폭발 경고
+    if (e.kind === "bomber" && e.state === "windup" && spr.red && Math.floor(e.t / 4) % 2 === 0) img = spr.red;
+    const a = ENEMY_STATIC_ANCHOR[e.kind] ?? { cx: 32, foot: 62 };
+    drawOutlined(ctx, spr, img, e.elite, -a.cx, -a.foot, 64, 64);
   }
   ctx.restore();
 
@@ -907,6 +998,45 @@ function drawEnemyShapes(ctx: CanvasRenderingContext2D, e: Enemy, camX: number) 
   ctx.restore();
 }
 
+/** 체력 포션: 붉은 플라스크 — 둥실 떠다니고, 만료 직전엔 깜빡인다 */
+function drawDrops(ctx: CanvasRenderingContext2D, w: World, camX: number) {
+  for (const d of w.drops) {
+    if (d.life < 150 && Math.floor(d.life / 5) % 2 === 0) continue; // 만료 임박 깜빡임
+    const sx = d.x - camX;
+    if (sx < -30 || sx > VW + 30) continue;
+    const bob = Math.sin(w.timeMs * 0.004 + d.x * 0.05) * 3;
+    const gy = groundY(d.z) - 14 + bob;
+    ctx.save();
+    // 바닥 그림자
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.ellipse(sx, groundY(d.z) + 1, 8, 3, 0, 0, 6.28);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    // 글로우
+    ctx.shadowColor = "#ff6a7a";
+    ctx.shadowBlur = 12;
+    // 병 몸통 (붉은 물약)
+    ctx.fillStyle = "#e64a5e";
+    ctx.beginPath();
+    ctx.arc(sx, gy, 7, 0, 6.28);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    // 하이라이트
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.beginPath();
+    ctx.arc(sx - 2.5, gy - 2.5, 2, 0, 6.28);
+    ctx.fill();
+    // 병목 + 코르크
+    ctx.fillStyle = "#d8e2f0";
+    ctx.fillRect(sx - 2.5, gy - 11, 5, 4);
+    ctx.fillStyle = "#b07a4a";
+    ctx.fillRect(sx - 2, gy - 14, 4, 3);
+    ctx.restore();
+  }
+}
+
 function drawBolts(ctx: CanvasRenderingContext2D, w: World, camX: number) {
   for (const b of w.bolts) {
     const sx = b.x - camX;
@@ -927,13 +1057,14 @@ export function drawScene(ctx: CanvasRenderingContext2D, w: World) {
   const camY = w.cam.oy;
   ctx.save();
   ctx.translate(0, camY);
-  drawBackground(ctx, camX);
+  drawBackground(ctx, camX, Math.floor((w.wave - 1) / 10));
 
   // 깊이 정렬: 뒤(z 큼) 먼저
   const ents: Fighter[] = [w.player, ...w.enemies];
   ents.sort((a, b) => b.z - a.z);
   for (const f of ents) shadow(ctx, f, camX);
   drawBolts(ctx, w, camX);
+  drawDrops(ctx, w, camX);
   for (const f of ents) {
     if (f instanceof Player) drawPlayer(ctx, f, camX);
     else if (f instanceof Enemy) drawEnemy(ctx, f, camX);

@@ -8,6 +8,13 @@ import { Camera } from "../core/camera";
 import { sfx } from "../core/audio";
 import { beltHit, groundY, rand, clamp, VW, STAGE_LEN } from "../core/util";
 
+export interface Drop {
+  x: number;
+  z: number;
+  life: number;
+  dead: boolean;
+}
+
 export interface Bolt {
   x: number;
   z: number;
@@ -24,21 +31,22 @@ interface WaveDef {
 
 const WAVES: WaveDef[] = [
   { banner: "제 1 균열 · 그림자 정찰대", list: [{ kind: "grunt", count: 3 }] },
-  { banner: "제 2 균열 · 돌격 선봉", list: [{ kind: "grunt", count: 3 }, { kind: "charger", count: 1 }] },
+  { banner: "제 2 균열 · 돌격 선봉", list: [{ kind: "grunt", count: 2 }, { kind: "charger", count: 1 }, { kind: "wolf", count: 1 }] },
   { banner: "제 3 균열 · 저주술사", list: [{ kind: "grunt", count: 2 }, { kind: "caster", count: 2 }] },
-  { banner: "제 4 균열 · 대공세", list: [{ kind: "charger", count: 2 }, { kind: "grunt", count: 2 }, { kind: "caster", count: 1 }] },
-  { banner: "제 5 균열 · 균열 폭주", list: [{ kind: "grunt", count: 4 }, { kind: "charger", count: 2 }] },
-  { banner: "제 6 균열 · 술사 결사대", list: [{ kind: "caster", count: 3 }, { kind: "grunt", count: 2 }] },
-  { banner: "제 7 균열 · 철갑 돌격대", list: [{ kind: "charger", count: 3 }, { kind: "caster", count: 1 }] },
-  { banner: "제 8 균열 · 그림자 군단", list: [{ kind: "grunt", count: 5 }, { kind: "charger", count: 1 }, { kind: "caster", count: 2 }] },
-  { banner: "제 9 균열 · 균열의 정예", list: [{ kind: "charger", count: 3 }, { kind: "caster", count: 3 }, { kind: "grunt", count: 2 }] },
-  { banner: "최종 균열 · 감시자 강림", list: [{ kind: "boss", count: 1 }, { kind: "grunt", count: 2 }] },
+  { banner: "제 4 균열 · 대공세", list: [{ kind: "charger", count: 1 }, { kind: "grunt", count: 2 }, { kind: "caster", count: 1 }, { kind: "bomber", count: 2 }] },
+  { banner: "제 5 균열 · 균열 폭주", list: [{ kind: "grunt", count: 3 }, { kind: "charger", count: 1 }, { kind: "wolf", count: 2 }] },
+  { banner: "제 6 균열 · 술사 결사대", list: [{ kind: "caster", count: 2 }, { kind: "shaman", count: 1 }, { kind: "grunt", count: 2 }, { kind: "bomber", count: 1 }] },
+  { banner: "제 7 균열 · 철갑 돌격대", list: [{ kind: "charger", count: 2 }, { kind: "guard", count: 1 }, { kind: "lancer", count: 1 }] },
+  { banner: "제 8 균열 · 그림자 군단", list: [{ kind: "grunt", count: 3 }, { kind: "wolf", count: 2 }, { kind: "caster", count: 1 }, { kind: "lancer", count: 1 }, { kind: "bomber", count: 1 }] },
+  { banner: "제 9 균열 · 균열의 정예", list: [{ kind: "guard", count: 1 }, { kind: "charger", count: 1 }, { kind: "caster", count: 1 }, { kind: "wolf", count: 1 }, { kind: "lancer", count: 2 }, { kind: "shaman", count: 1 }] },
+  { banner: "최종 균열 · 감시자 강림", list: [{ kind: "boss", count: 1 }, { kind: "guard", count: 1 }, { kind: "grunt", count: 1 }] },
 ];
 
 export class World implements Arena {
   player: Player;
   enemies: Fighter[] = [];
   bolts: Bolt[] = [];
+  drops: Drop[] = []; // 체력 포션
   particles = new Particles();
   cam = new Camera();
 
@@ -84,6 +92,18 @@ export class World implements Arena {
     this.bolts.push({ x, z, vx, dmg, life: 150, dead: false });
   }
 
+  /** 디버그/테스트: 해당 웨이브(1부터 셈)로 즉시 점프 — 판 정리 후 새로 소환, 체력·MP 회복 */
+  jumpToWave(n: number) {
+    this.wave = Math.max(0, Math.floor(n) - 1);
+    this.enemies = [];
+    this.bolts = [];
+    this.drops = [];
+    this.betweenT = 0;
+    this.player.hp = this.player.maxHp;
+    this.player.mp = this.player.maxMp;
+    this.nextWave();
+  }
+
   private nextWave() {
     // 무한 모드: 10웨이브가 한 주기. 11웨이브부터는 1웨이브 패턴이 더 강하게 반복된다.
     const widx = this.wave % WAVES.length;
@@ -103,7 +123,10 @@ export class World implements Arena {
         let x = clamp(px + side * off, 60, STAGE_LEN - 60);
         side *= -1;
         const z = rand(24, 140);
-        const e = new Enemy(grp.kind, x, z, hpMul, dmgMul);
+        // 엘리트(기습병): 노란 테두리 — 엇박자 예비동작·기습 공격
+        const elite =
+          grp.kind !== "boss" && Math.random() < Math.min(0.35, 0.04 + widx * 0.03 + cycle * 0.08);
+        const e = new Enemy(grp.kind, x, z, hpMul, dmgMul, elite);
         if (grp.kind === "boss") {
           e.x = clamp(px + (px < STAGE_LEN / 2 ? 420 : -420), 80, STAGE_LEN - 80);
           e.z = 80;
@@ -129,6 +152,13 @@ export class World implements Arena {
     }
 
     if (this.result !== "playing") {
+      // 사망 여운: 시체 쓰러지는 모션 진행 + 잔불
+      if (this.player.dead) {
+        this.player.deathT++;
+        if (this.player.deathT < 70 && this.player.deathT % 5 === 0) {
+          this.particles.ember(this.player.x, groundY(this.player.z) - 14, 2, "rgba(255,110,110,0.8)");
+        }
+      }
       this.particles.update();
       this.cam.update();
       return;
@@ -158,6 +188,8 @@ export class World implements Arena {
     for (const e of this.enemies) e.update(this);
     // 투사체
     this.updateBolts();
+    // 포션
+    this.updateDrops();
 
     // 히트 판정
     this.resolveHits();
@@ -177,6 +209,16 @@ export class World implements Arena {
     // 게임오버
     if (this.player.dead && this.result === "playing") {
       this.result = "lose";
+      // 사망 연출: 화면 번쩍 + 충격파 + 불꽃, 시간이 늘어지듯
+      const px = this.player.x;
+      const pgy = groundY(this.player.z) - this.player.air - 24;
+      this.hitFlash = 26;
+      this.particles.ring(px, pgy, "rgba(255,80,80,0.95)", 24, 12, 30);
+      this.particles.ring(px, pgy, "rgba(255,255,255,0.9)", 12, 16, 24);
+      this.particles.spark(px, pgy, 30, "#ff8a8a", 11);
+      this.particles.ember(px, pgy, 20, "rgba(255,120,120,0.9)");
+      this.particles.glow(px, pgy, "rgba(255,60,60,0.6)", 70, 24);
+      this.cam.shake(18);
       sfx.lose();
       this.slowmo(60, 0.5);
     }
@@ -208,6 +250,29 @@ export class World implements Arena {
     this.bolts = this.bolts.filter((b) => !b.dead);
   }
 
+  private updateDrops() {
+    const p = this.player;
+    for (const d of this.drops) {
+      d.life--;
+      if (d.life <= 0) {
+        d.dead = true;
+        continue;
+      }
+      // 획득: 가까이 지나가면 흡수 (체력이 가득이면 남겨둔다)
+      if (!p.dead && p.hp < p.maxHp && p.air < 30 && beltHit(d.x, d.z, p.x, p.z, 28, 26)) {
+        d.dead = true;
+        const heal = 30;
+        p.hp = Math.min(p.maxHp, p.hp + heal);
+        const gy = groundY(d.z) - 30;
+        this.particles.text(d.x, gy, `+${heal}`, "#7dff9a", 1.2);
+        this.particles.glow(d.x, gy, "rgba(120,255,150,0.6)", 30, 10);
+        this.particles.spark(d.x, gy, 8, "#7dff9a", 6);
+        sfx.launch();
+      }
+    }
+    this.drops = this.drops.filter((d) => !d.dead);
+  }
+
   private resolveHits() {
     const p = this.player;
     // 플레이어 → 적
@@ -216,8 +281,29 @@ export class World implements Arena {
       for (const e of this.enemies) {
         if (e.dead) continue;
         if (!this.inRange(a, e)) continue;
-        // 패링: 적이 공격 직전(예비 후반)~공격 중일 때 검이 닿으면 튕겨낸다
-        if (e instanceof Enemy && this.tryParry(a, e)) continue;
+        // 패링: 적이 공격 직전(예비 후반)~공격 중일 때 검이 닿으면 튕겨낸다 — 일반 공격만. 스킬은 그대로 꽂힌다
+        if (e instanceof Enemy && !a.skill && this.tryParry(a, e)) continue;
+        // 수호병: 정면 가드 — 일반 공격은 무효, 스킬은 60% 관통. 패링하거나 등 뒤를 노려라
+        if (e instanceof Enemy && e.blocksFrontal(p.x) && !e.hitBy.has(a.hitId)) {
+          if (!a.skill) {
+            e.hitBy.add(a.hitId);
+            const ggy = groundY(e.z) - e.air - 30;
+            this.particles.spark(e.x + e.facing * 16, ggy, 6, "#cfd6e4", 5);
+            this.particles.text(e.x, ggy - 12, "GUARD", "#cfd6e4", 0.9);
+            this.freeze(3);
+            this.cam.shake(2);
+            sfx.hit();
+            continue;
+          }
+          const pierced = { ...a, dmg: Math.max(1, Math.round(a.dmg * 0.6)) };
+          const wasAlive = !e.dead;
+          if (e.hurt(pierced, p.x, this)) {
+            this.particles.text(e.x, groundY(e.z) - e.air - 46, "PIERCE", "#ffd76a", 0.9);
+            this.onPlayerLand(pierced, e);
+            if (wasAlive && e.dead) this.onEnemyDeath(e);
+          }
+          continue;
+        }
         const wasAlive = !e.dead;
         if (e.hurt(a, p.x, this)) {
           this.onPlayerLand(a, e);
@@ -267,8 +353,8 @@ export class World implements Arena {
     e.flash = 8;
     e.facing = -dir;
 
-    // 보상: MP 소량 회복
-    this.player.mp = Math.min(this.player.maxMp, this.player.mp + 8);
+    // 보상: MP 대폭 회복 — 패링이 주 MP 수급원
+    this.player.mp = Math.min(this.player.maxMp, this.player.mp + 22);
 
     const gy = groundY(e.z) - 34;
     const mx = (this.player.x + e.x) / 2;
@@ -332,6 +418,23 @@ export class World implements Arena {
   private onEnemyDeath(e: Enemy) {
     e.playDeathFx(this);
     this.addScore(Math.round(e.spec.score * e.powerMul));
+    if (e.kind === "bomber") {
+      // 자폭충은 죽어도 터진다! (직접 터뜨린 것보단 약하게)
+      const bgy = groundY(e.z) - e.air;
+      this.particles.ring(e.x, bgy - 16, "rgba(255,150,60,0.95)", 20, 10, 26);
+      this.particles.spark(e.x, bgy - 18, 20, "#ffb060", 9);
+      this.particles.ember(e.x, bgy - 14, 12, "rgba(255,150,60,0.9)");
+      this.cam.shake(10);
+      sfx.nova();
+      if (!this.player.dead && this.player.invuln <= 0 && this.player.air < 60 && beltHit(e.x, e.z, this.player.x, this.player.z, 80, 50)) {
+        this.hitPlayer(Math.round(e.spec.dmg * e.dmgMul * 0.6), this.player.x >= e.x ? 1 : -1, 16, e.x);
+      }
+    }
+    // 체력 포션 드랍 (보스 확정, 돌격병 30%, 그 외 18%)
+    const dropRate = e.kind === "boss" ? 1 : e.kind === "charger" ? 0.3 : 0.18;
+    if (Math.random() < dropRate) {
+      this.drops.push({ x: e.x, z: e.z, life: 720, dead: false });
+    }
     this.cam.shake(e.kind === "boss" ? 20 : 6);
     if (e.kind === "boss") {
       // 주기 보스 격퇴 — 승리 종료 대신 연출 후 다음 주기로 계속

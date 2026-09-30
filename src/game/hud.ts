@@ -116,8 +116,18 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: World) {
     ctx.fillStyle = "#ffb0c0";
     ctx.textAlign = "center";
     ctx.font = "800 15px 'Segoe UI', sans-serif";
+    // 짧은 2겹 피통(총량 동일): 노란 겹이 먼저 닳고 다 비면 빨간 겹 — 빨강까지 비면 사망.
+    // 좌상단 플레이어 패널(x12~262)과 겹치지 않게 x330부터.
     ctx.fillText("균열 감시자 · RIFT WARDEN", VW / 2, 26);
-    bar(ctx, VW / 2 - 260, 34, 520, 12, boss.hp / boss.maxHp, "#ff4d6a");
+    const ratio = boss.hp / boss.maxHp;
+    const bx = VW / 2 - 150;
+    if (ratio > 0.5) {
+      bar(ctx, bx, 34, 300, 12, 1, "#ff4d6a");
+      ctx.fillStyle = "#ffd24d";
+      ctx.fillRect(bx, 34, 300 * (ratio - 0.5) * 2, 12);
+    } else {
+      bar(ctx, bx, 34, 300, 12, ratio * 2, "#ff4d6a");
+    }
   }
 
   // 웨이브 배너

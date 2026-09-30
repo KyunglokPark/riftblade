@@ -22,6 +22,7 @@ export interface ActiveAttack {
   shake: number;
   hitId: string; // 같은 스윙 중복 타격 방지
   sfx?: "hit" | "heavy" | "launch" | "nova";
+  skill?: boolean; // 스킬 공격: 패링 판정 무시, 수호병 가드도 60% 관통
   onHit?: (t: Fighter) => void;
 }
 
@@ -62,6 +63,7 @@ export abstract class Fighter {
   flash = 0;
   dead = false;
   active: ActiveAttack | null = null;
+  lockFacingOnHurt = false; // 피격 시 자동으로 공격자를 향하지 않음 (수호병: 등이 계속 열려 있어야 함)
   hitBy = new Set<string>();
   walkPhase = 0;
 
@@ -102,7 +104,7 @@ export abstract class Fighter {
       this.air = Math.max(this.air, 1);
       this.state = "air";
     }
-    this.facing = -dir; // 맞으면 공격자 쪽을 향함
+    if (!this.lockFacingOnHurt) this.facing = -dir; // 맞으면 공격자 쪽을 향함
     if (this.hp <= 0) {
       this.hp = 0;
       this.dead = true;

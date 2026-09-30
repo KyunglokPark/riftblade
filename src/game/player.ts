@@ -55,6 +55,7 @@ export class Player extends Fighter {
   private airHits = 0;
   private slammed = false;
   score = 0;
+  deathT = 0; // 사망 후 경과 틱 (쓰러지는 모션용)
 
   // 입력 버퍼(프레임): 바쁜 상태에서 누른 키를 잠깐 저장했다가 가능해지면 발동
   private jumpBuf = 0;
@@ -172,11 +173,13 @@ export class Player extends Fighter {
     if (this.cd1 > 0) this.cd1--;
     if (this.cd2 > 0) this.cd2--;
     if (this.cd3 > 0) this.cd3--;
-    if (this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + 0.06);
+    // MP 자연회복은 아주 느리게 — 주 수급원은 패링
+    if (this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + 0.015);
 
     this.pollInput(); // 매 틱 입력 엣지 → 버퍼 (바쁜 상태여도 유실 방지)
 
     if (this.dead) {
+      this.deathT++;
       this.integrate();
       return;
     }
@@ -391,6 +394,7 @@ export class Player extends Fighter {
         shake: last ? 8 : 3,
         hitId: this.swingId,
         sfx: last ? "heavy" : "hit",
+        skill: true,
       };
       const gy = groundY(this.z) - this.air - 34;
       arena.particles.slash(this.x + this.facing * 34, gy, this.facing > 0 ? 0 : Math.PI, WHITE, 1.2);
@@ -433,6 +437,7 @@ export class Player extends Fighter {
           shake: 14,
           hitId: this.swingId,
           sfx: "nova",
+          skill: true,
         };
         const gy = groundY(this.z);
         arena.particles.ring(this.x, gy - 10, "rgba(150,240,255,0.9)", 20, 8, 24);
@@ -481,6 +486,7 @@ export class Player extends Fighter {
         shake: 18,
         hitId: this.swingId,
         sfx: "nova",
+        skill: true,
       };
       arena.particles.ring(this.x, gy - 20, "rgba(200,150,255,0.95)", 24, 12, 26);
       arena.particles.ring(this.x, gy - 20, "rgba(255,255,255,0.8)", 12, 16, 22);
