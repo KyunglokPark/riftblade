@@ -51,6 +51,9 @@ const heroAtkWindup = loadSpr("/sprites/hero_atk_windup.png");
 const heroAtkStrike = loadSpr("/sprites/hero_atk_strike.png");
 // 점프 프레임 (88 캔버스, 수직 속도에 매핑: 도약→상승→정점→하강). 프레임별 발/중심 앵커
 const heroJump = [0, 1, 2, 3].map((i) => loadSpr(`/sprites/hero_jump_${i}.png`));
+// 사망 키포즈 (create-character-state, 96x96): 무릎 꿇고 고개 떨굼 → 쓰러져 누움
+const heroDeathKneel = loadSpr("/sprites/hero_death_kneel.png");
+const heroDeathLying = loadSpr("/sprites/hero_death_lying.png");
 const HERO_JUMP_ANCHOR = [
   { cx: 43, foot: 70 },
   { cx: 39, foot: 52 },
@@ -484,7 +487,24 @@ function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, camX: number) {
       : null;
   const atkReady = atkPose !== null && atkPose.ready;
 
-  // 사망: 흰 플리커(피격 flash) 후 등 뒤로 무너지듯 눕고 서서히 흐려진다
+  // 사망: 키포즈 2장 — 무릎 꿇기(충격) → 완전히 쓰러짐. 로딩 전엔 아래 회전 폴백
+  if (p.dead && heroDeathKneel.ready && heroDeathLying.ready) {
+    const lying = p.deathT > 40;
+    const dspr = lying ? heroDeathLying : heroDeathKneel;
+    const a = lying ? { cx: 50, foot: 80 } : { cx: 52, foot: 90 };
+    const alpha = Math.max(0.65, 1 - Math.max(0, p.deathT - 40) * 0.003);
+    const dimg =
+      p.flash > 0 && Math.floor(p.flash / 2) % 2 === 0 && dspr.white ? dspr.white : dspr.img;
+    ctx.save();
+    ctx.translate(sx, gy);
+    ctx.globalAlpha = alpha;
+    ctx.scale(f * S, S);
+    ctx.drawImage(dimg, -a.cx, -a.foot, 96, 96);
+    ctx.restore();
+    return;
+  }
+
+  // 사망(폴백): 흰 플리커(피격 flash) 후 등 뒤로 무너지듯 눕고 서서히 흐려진다
   let deathAlpha = 1;
   if (p.dead) {
     const dp = Math.min(1, p.deathT / 44);
