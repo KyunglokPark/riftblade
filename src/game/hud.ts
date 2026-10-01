@@ -110,15 +110,41 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: World) {
     ctx.fillText(`${SKILLS[i].cost}MP`, x + 29, sy + 50);
   }
 
+  // 포션 슬롯 (스킬 옆, H키)
+  {
+    const x = sx + 3 * 66;
+    const has = w.potions > 0;
+    ctx.fillStyle = has ? "rgba(60,30,40,0.85)" : "rgba(20,26,40,0.85)";
+    ctx.fillRect(x, sy, 58, 54);
+    ctx.strokeStyle = has ? "#ff8a9a" : "rgba(120,150,190,0.4)";
+    ctx.lineWidth = has ? 2 : 1;
+    ctx.strokeRect(x, sy, 58, 54);
+    // 작은 플라스크
+    ctx.fillStyle = has ? "#ff5b6e" : "rgba(160,120,130,0.5)";
+    ctx.fillRect(x + 23, sy + 14, 12, 14);
+    ctx.fillRect(x + 26, sy + 9, 6, 6);
+    ctx.textAlign = "center";
+    ctx.fillStyle = has ? "#dff9ff" : "rgba(200,220,240,0.5)";
+    ctx.font = "900 12px 'Segoe UI', sans-serif";
+    ctx.fillText(`x${w.potions}`, x + 29, sy + 40);
+    ctx.font = "600 10px 'Segoe UI', sans-serif";
+    ctx.fillText("H 포션", x + 29, sy + 50);
+  }
+
   // 보스 체력바
-  const boss = w.enemies.find((e) => e instanceof Enemy && e.kind === "boss") as Enemy | undefined;
+  const boss = w.enemies.find((e) => e instanceof Enemy && e.isBoss) as Enemy | undefined;
   if (boss && !boss.dead) {
     ctx.fillStyle = "#ffb0c0";
     ctx.textAlign = "center";
     ctx.font = "800 15px 'Segoe UI', sans-serif";
     // 짧은 2겹 피통(총량 동일): 노란 겹이 먼저 닳고 다 비면 빨간 겹 — 빨강까지 비면 사망.
     // 좌상단 플레이어 패널(x12~262)과 겹치지 않게 x330부터.
-    ctx.fillText("균열 감시자 · RIFT WARDEN", VW / 2, 26);
+    const BOSS_TITLE: Record<string, string> = {
+      boss: "균열 감시자 · RIFT WARDEN",
+      boss2: "공허 사신 · VOID REAPER",
+      boss3: "잿불 거인 · EMBER COLOSSUS",
+    };
+    ctx.fillText(BOSS_TITLE[boss.kind] ?? BOSS_TITLE.boss, VW / 2, 26);
     const ratio = boss.hp / boss.maxHp;
     const bx = VW / 2 - 150;
     if (ratio > 0.5) {

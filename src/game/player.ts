@@ -169,6 +169,13 @@ export class Player extends Fighter {
     };
   }
 
+  /** 치명타 보호: 어떤 공격도 한 방에 최대 체력의 45%를 넘는 피해를 주지 못한다 */
+  hurt(a: import("./fighter").ActiveAttack, attackerX: number, arena: Arena): boolean {
+    const cap = Math.round(this.maxHp * 0.45);
+    const capped = a.dmg > cap ? { ...a, dmg: cap } : a;
+    return super.hurt(capped, attackerX, arena);
+  }
+
   update(arena: Arena): void {
     if (this.cd1 > 0) this.cd1--;
     if (this.cd2 > 0) this.cd2--;

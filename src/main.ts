@@ -29,6 +29,11 @@ function startGame() {
 // 웨이브 점프 치트: 플레이 중 Enter → 숫자 입력 → Enter (Esc 취소)
 let waveJumpBuf: string | null = null;
 window.addEventListener("keydown", (e) => {
+  // 사망 화면에서 Esc → 타이틀로
+  if (state === "lose" && e.key === "Escape") {
+    state = "title";
+    return;
+  }
   if (state !== "play") {
     waveJumpBuf = null;
     return;
@@ -63,7 +68,16 @@ function tick() {
     world.update(); // fx 여운
     if (state === "lose") loseT++;
     // 사망 연출이 자리 잡기 전엔 Enter 무시 (연타로 스킵되는 것 방지)
-    if (pressed("start") && (state !== "lose" || loseT > 45)) state = "title";
+    if (pressed("start")) {
+      if (state === "lose" && loseT > 45) {
+        // 마지막 체크포인트에서 계속
+        world.respawn();
+        state = "play";
+        sfx.ui();
+      } else if (state === "win") {
+        state = "title";
+      }
+    }
     return;
   }
   if (state === "pause") {
@@ -150,7 +164,7 @@ function drawControlsHint() {
   ctx.textAlign = "right";
   ctx.fillStyle = "rgba(160,190,230,0.5)";
   ctx.font = "500 11px 'Segoe UI', sans-serif";
-  ctx.fillText("이동 WASD/화살표 · 공격 J · 점프 K · 대시 L · 스킬 U I O · 일시정지 P", VW - 12, VH - 12);
+  ctx.fillText("이동 WASD/화살표 · 공격 J · 점프 K · 대시 L · 스킬 U I O · 포션 H · 일시정지 P", VW - 12, VH - 12);
   ctx.restore();
 }
 
@@ -195,7 +209,8 @@ function drawYouDie() {
     ctx.fillStyle = "rgba(220,240,255,0.9)";
     ctx.font = "600 18px 'Segoe UI', sans-serif";
     ctx.fillText(`점수 ${world.score} · 최대 콤보 ${world.maxCombo}`, VW / 2, VH / 2 + 78);
-    if (Math.floor(loseT / 35) % 2 === 0) ctx.fillText("Enter 로 타이틀", VW / 2, VH / 2 + 108);
+    if (Math.floor(loseT / 35) % 2 === 0)
+      ctx.fillText(`Enter — WAVE ${world.checkpointWave} 체크포인트에서 계속 · Esc — 타이틀`, VW / 2, VH / 2 + 108);
     ctx.globalAlpha = 1;
   }
 }

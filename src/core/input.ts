@@ -12,7 +12,8 @@ export type Action =
   | "skill2"
   | "skill3"
   | "pause"
-  | "start";
+  | "start"
+  | "potion";
 
 const MAP: Record<string, Action> = {
   ArrowLeft: "left",
@@ -32,6 +33,7 @@ const MAP: Record<string, Action> = {
   KeyI: "skill2",
   KeyO: "skill3",
   KeyP: "pause",
+  KeyH: "potion",
   Enter: "start",
 };
 

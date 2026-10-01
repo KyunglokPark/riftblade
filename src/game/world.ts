@@ -7,6 +7,7 @@ import { Particles } from "../core/particles";
 import { Camera } from "../core/camera";
 import { sfx } from "../core/audio";
 import { beltHit, groundY, rand, clamp, VW, STAGE_LEN } from "../core/util";
+import { pressed } from "../core/input";
 
 export interface Drop {
   x: number;
@@ -39,7 +40,7 @@ const WAVES: WaveDef[] = [
   { banner: "제 7 균열 · 철갑 돌격대", list: [{ kind: "charger", count: 2 }, { kind: "guard", count: 1 }, { kind: "lancer", count: 1 }] },
   { banner: "제 8 균열 · 그림자 군단", list: [{ kind: "grunt", count: 3 }, { kind: "wolf", count: 2 }, { kind: "caster", count: 1 }, { kind: "lancer", count: 1 }, { kind: "bomber", count: 1 }] },
   { banner: "제 9 균열 · 균열의 정예", list: [{ kind: "guard", count: 1 }, { kind: "charger", count: 1 }, { kind: "caster", count: 1 }, { kind: "wolf", count: 1 }, { kind: "lancer", count: 2 }, { kind: "shaman", count: 1 }] },
-  { banner: "최종 균열 · 감시자 강림", list: [{ kind: "boss", count: 1 }, { kind: "guard", count: 1 }, { kind: "grunt", count: 1 }] },
+  { banner: "최종 균열 · 감시자 강림", list: [{ kind: "boss", count: 1 }] },
 ];
 
 export class World implements Arena {
@@ -60,6 +61,13 @@ export class World implements Arena {
   banner = "";
   bannerT = 0;
   private betweenT = 0;
+
+  // 체크포인트·포션: 죽으면 마지막 체크포인트부터, 포션은 H키로 마신다
+  static readonly POTION_START = 3;
+  static readonly POTION_MAX = 5;
+  checkpointWave = 1; // 죽었을 때 복귀할 웨이브 (1부터 셈)
+  potions = World.POTION_START;
+  private potionCd = 0;
 
   private freezeT = 0;
   private slowT = 0;
@@ -112,22 +120,43 @@ export class World implements Arena {
     // 스케일링: 같은 몹이라도 뒤 웨이브일수록, 다음 주기일수록 강하다
     const hpMul = (1 + 0.15 * widx) * (1 + 0.9 * cycle);
     const dmgMul = (1 + 0.08 * widx) * (1 + 0.45 * cycle);
+    // 보스 로테이션: 10웨이브 감시자 → 20웨이브 공허 사신 → 30웨이브 잿불 거인 → 반복
+    const bossKind: EnemyKind = (["boss", "boss2", "boss3"] as const)[cycle % 3];
+    const BOSS_BANNER: Record<string, string> = {
+      boss: "최종 균열 · 감시자 강림",
+      boss2: "최종 균열 · 공허 사신 강림",
+      boss3: "최종 균열 · 잿불 거인 강림",
+    };
+    const bannerText = widx === WAVES.length - 1 ? BOSS_BANNER[bossKind] : def.banner;
     this.banner =
-      `WAVE ${this.wave + 1} — ${def.banner}` + (cycle > 0 ? ` · ${cycle + 1}주기` : "");
+      `WAVE ${this.wave + 1} — ${bannerText}` + (cycle > 0 ? ` · ${cycle + 1}주기` : "");
     this.bannerT = 150;
     let side = 1;
+    const sideN = [0, 0]; // 같은 쪽 몇 번째인지 — 세로로 줄줄이 겹쳐 스폰되는 것 방지
     for (const grp of def.list) {
       for (let i = 0; i < grp.count; i++) {
         const px = this.player.x;
-        const off = VW * 0.55 + rand(20, 200);
+        const si = side > 0 ? 0 : 1;
+        const off = VW * 0.55 + 30 + sideN[si] * 110 + rand(0, 70);
+        sideN[si]++;
         let x = clamp(px + side * off, 60, STAGE_LEN - 60);
         side *= -1;
         const z = rand(24, 140);
+        const kind: EnemyKind = grp.kind === "boss" ? bossKind : grp.kind;
         // 엘리트(기습병): 노란 테두리 — 엇박자 예비동작·기습 공격
         const elite =
-          grp.kind !== "boss" && Math.random() < Math.min(0.35, 0.04 + widx * 0.03 + cycle * 0.08);
-        const e = new Enemy(grp.kind, x, z, hpMul, dmgMul, elite);
-        if (grp.kind === "boss") {
+          !kind.startsWith("boss") && Math.random() < Math.min(0.35, 0.04 + widx * 0.03 + cycle * 0.08);
+        // 보스는 웨이브(widx) 스케일링 제외 — 기본 스펙 + 완만한 주기 성장만
+        const isBossKind = kind.startsWith("boss");
+        const e = new Enemy(
+          kind,
+          x,
+          z,
+          isBossKind ? 1 + 0.35 * cycle : hpMul,
+          isBossKind ? 1 + 0.3 * cycle : dmgMul,
+          elite
+        );
+        if (kind.startsWith("boss")) {
           e.x = clamp(px + (px < STAGE_LEN / 2 ? 420 : -420), 80, STAGE_LEN - 80);
           e.z = 80;
           sfx.bossRoar();
@@ -136,6 +165,56 @@ export class World implements Arena {
       }
     }
     this.wave++;
+    // 체크포인트: 웨이브 1·4·7·10 (배경 전환 지점 + 보스 직전) — 완전 회복 + 포션 리필
+    if (widx % 3 === 0) {
+      this.checkpointWave = this.wave;
+      this.player.hp = this.player.maxHp;
+      this.player.mp = this.player.maxMp;
+      this.potions = Math.max(this.potions, World.POTION_START);
+      const pgy = groundY(this.player.z) - 60;
+      this.particles.text(this.player.x, pgy, "CHECKPOINT", "#8ef0c0", 1.3);
+      this.particles.ring(this.player.x, pgy + 26, "rgba(142,240,192,0.8)", 14, 10, 30);
+      this.particles.glow(this.player.x, pgy + 26, "rgba(142,240,192,0.5)", 50, 16);
+    }
+  }
+
+  /** 사망 후 마지막 체크포인트에서 부활 */
+  respawn() {
+    const pl = this.player;
+    pl.dead = false;
+    pl.deathT = 0;
+    pl.hitstun = 0;
+    pl.invuln = 90; // 부활 직후 잠시 무적
+    pl.state = "idle";
+    pl.vx = 0;
+    pl.vz = 0;
+    pl.air = 0;
+    pl.vair = 0;
+    this.result = "playing";
+    this.combo = 0;
+    this.hitFlash = 0;
+    this.potions = World.POTION_START;
+    this.jumpToWave(this.checkpointWave);
+  }
+
+  /** H키: 포션 마시기 */
+  private drinkPotion() {
+    if (this.potionCd > 0 || this.player.dead) return;
+    if (this.potions <= 0) {
+      this.particles.text(this.player.x, groundY(this.player.z) - 60, "포션 없음", "#9fb4cc", 0.9);
+      this.potionCd = 20;
+      return;
+    }
+    if (this.player.hp >= this.player.maxHp) return;
+    this.potions--;
+    this.potionCd = 30;
+    const heal = 35;
+    this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
+    const gy = groundY(this.player.z) - this.player.air - 40;
+    this.particles.text(this.player.x, gy, `+${heal}`, "#7dff9a", 1.3);
+    this.particles.glow(this.player.x, gy + 10, "rgba(120,255,150,0.6)", 36, 12);
+    this.particles.spark(this.player.x, gy + 10, 10, "#7dff9a", 6);
+    sfx.launch();
   }
 
   private aliveEnemies() {
@@ -181,6 +260,10 @@ export class World implements Arena {
         return;
       }
     }
+
+    // 포션 (H)
+    if (this.potionCd > 0) this.potionCd--;
+    if (pressed("potion")) this.drinkPotion();
 
     // 플레이어
     this.player.update(this);
@@ -258,13 +341,12 @@ export class World implements Arena {
         d.dead = true;
         continue;
       }
-      // 획득: 가까이 지나가면 흡수 (체력이 가득이면 남겨둔다)
-      if (!p.dead && p.hp < p.maxHp && p.air < 30 && beltHit(d.x, d.z, p.x, p.z, 28, 26)) {
+      // 획득: 인벤토리에 적재 (H키로 마심). 가방이 가득이면 남겨둔다
+      if (!p.dead && this.potions < World.POTION_MAX && p.air < 30 && beltHit(d.x, d.z, p.x, p.z, 28, 26)) {
         d.dead = true;
-        const heal = 30;
-        p.hp = Math.min(p.maxHp, p.hp + heal);
+        this.potions++;
         const gy = groundY(d.z) - 30;
-        this.particles.text(d.x, gy, `+${heal}`, "#7dff9a", 1.2);
+        this.particles.text(d.x, gy, "+1 포션", "#7dff9a", 1.1);
         this.particles.glow(d.x, gy, "rgba(120,255,150,0.6)", 30, 10);
         this.particles.spark(d.x, gy, 8, "#7dff9a", 6);
         sfx.launch();
@@ -305,8 +387,11 @@ export class World implements Arena {
           continue;
         }
         const wasAlive = !e.dead;
-        if (e.hurt(a, p.x, this)) {
-          this.onPlayerLand(a, e);
+        // 패링 스턴 중 타격은 크리티컬: 1.5배 데미지
+        const crit = e instanceof Enemy && e.parryStunned && e.hitstun > 0;
+        const atk = crit ? { ...a, dmg: Math.round(a.dmg * 1.5) } : a;
+        if (e.hurt(atk, p.x, this)) {
+          this.onPlayerLand(atk, e, crit);
           if (wasAlive && e.dead) this.onEnemyDeath(e as Enemy);
         }
       }
@@ -335,6 +420,7 @@ export class World implements Arena {
    * 적의 공격을 취소하고 뒤로 밀어내며 잠시 스턴. 데미지 대신 확실한 반격 기회를 준다.
    */
   private tryParry(a: ActiveAttack, e: Enemy): boolean {
+    if (e.kind === "caster" || e.kind === "shaman") return false; // 마법은 칼로 튕겨낼 수 없다
     if (e.hitBy.has(a.hitId)) return false;
     const anim = e.attackAnim();
     if (!anim) return false;
@@ -342,13 +428,14 @@ export class World implements Arena {
 
     e.hitBy.add(a.hitId); // 같은 스윙으로 중복 패링 방지
     const dir = e.x >= this.player.x ? 1 : -1;
-    const boss = e.kind === "boss";
+    const boss = e.isBoss;
     e.active = null; // 적의 이번 공격은 무효
     e.telegraph = 0;
     e.state = "hurt";
     e.t = 0;
-    e.hitstun = boss ? 36 : 60; // 스턴 — 반격 콤보 넣을 시간
-    e.vx = (dir * (boss ? 14 : 22)) / e.weight; // 뒤로 밀려남
+    e.hitstun = boss ? 54 : 100; // 긴 스턴 — 반격 콤보를 확실히 넣을 시간
+    e.parryStunned = true; // 스턴 동안의 타격은 크리티컬
+    e.vx = (dir * (boss ? 5 : 8)) / e.weight; // 살짝만 밀려나 콤보 사거리 안에 남는다
     e.vz = 0;
     e.flash = 8;
     e.facing = -dir;
@@ -367,12 +454,13 @@ export class World implements Arena {
     return true;
   }
 
-  private onPlayerLand(a: ActiveAttack, e: Fighter) {
+  private onPlayerLand(a: ActiveAttack, e: Fighter, crit = false) {
     const gy = groundY(e.z) - e.air - 26;
-    const col = a.sfx === "nova" ? "#c9a8ff" : a.sfx === "heavy" ? "#ffe08a" : "#bff4ff";
-    this.particles.spark(e.x, gy, a.sfx === "nova" ? 18 : 9, col, a.sfx === "heavy" ? 9 : 6);
-    this.particles.glow(e.x, gy, "rgba(180,240,255,0.5)", 26, 8);
-    this.particles.text(e.x, gy - 8, `${a.dmg}`, col, a.dmg >= 20 ? 1.5 : 1);
+    const col = crit ? "#ffd54a" : a.sfx === "nova" ? "#c9a8ff" : a.sfx === "heavy" ? "#ffe08a" : "#bff4ff";
+    this.particles.spark(e.x, gy, crit ? 16 : a.sfx === "nova" ? 18 : 9, col, crit ? 8 : a.sfx === "heavy" ? 9 : 6);
+    this.particles.glow(e.x, gy, crit ? "rgba(255,213,74,0.55)" : "rgba(180,240,255,0.5)", 26, 8);
+    this.particles.text(e.x, gy - 8, `${a.dmg}`, col, crit ? 1.5 : a.dmg >= 20 ? 1.5 : 1);
+    if (crit) this.particles.text(e.x, gy - 30, "CRITICAL", "#ffd54a", 1.15);
     this.freeze(a.hitstop);
     this.cam.shake(a.shake);
     this.addScore(a.dmg);
@@ -431,12 +519,12 @@ export class World implements Arena {
       }
     }
     // 체력 포션 드랍 (보스 확정, 돌격병 30%, 그 외 18%)
-    const dropRate = e.kind === "boss" ? 1 : e.kind === "charger" ? 0.3 : 0.18;
+    const dropRate = e.isBoss ? 1 : e.kind === "charger" ? 0.3 : 0.18;
     if (Math.random() < dropRate) {
       this.drops.push({ x: e.x, z: e.z, life: 720, dead: false });
     }
-    this.cam.shake(e.kind === "boss" ? 20 : 6);
-    if (e.kind === "boss") {
+    this.cam.shake(e.isBoss ? 20 : 6);
+    if (e.isBoss) {
       // 주기 보스 격퇴 — 승리 종료 대신 연출 후 다음 주기로 계속
       this.slowmo(50, 0.4);
       this.freeze(16);

@@ -62,23 +62,27 @@ const enemySpr: Record<string, Spr> = {
   charger: loadSpr("/sprites/charger.png"),
   caster: loadSpr("/sprites/caster.png"),
   boss: loadSpr("/sprites/boss.png"),
+  boss2: loadSpr("/sprites/boss2.png"),
+  boss3: loadSpr("/sprites/boss3.png"),
   wolf: loadSpr("/sprites/wolf.png"),
   guard: loadSpr("/sprites/guard.png"),
   bomber: loadSpr("/sprites/bomber.png"),
   lancer: loadSpr("/sprites/lancer.png"),
   shaman: loadSpr("/sprites/shaman.png"),
 };
-const ENEMY_SCALE: Record<string, number> = { grunt: 1.0, charger: 1.18, caster: 1.02, boss: 2.6, wolf: 1.0, guard: 1.15, bomber: 0.95, lancer: 1.05, shaman: 1.05 };
+const ENEMY_SCALE: Record<string, number> = { grunt: 1.0, charger: 1.18, caster: 1.02, boss: 2.6, boss2: 2.4, boss3: 2.9, wolf: 1.0, guard: 1.15, bomber: 0.95, lancer: 1.05, shaman: 1.05 };
 // 정지 스프라이트(64캔버스)의 실측 앵커 — 종류별 발/중심이 달라 뜨거나 파묻히는 것 방지
 const ENEMY_STATIC_ANCHOR: Record<string, { cx: number; foot: number }> = {
   guard: { cx: 33, foot: 61 },
   bomber: { cx: 33, foot: 56 },
   lancer: { cx: 27, foot: 63 },
   shaman: { cx: 31, foot: 61 },
+  boss2: { cx: 31, foot: 61 },
+  boss3: { cx: 32, foot: 61 },
 };
 
 // 적 걷기 프레임 (Pixellab v3 walking). 캔버스가 88/84 혼재라 종류별 발/중심 앵커 사용.
-const ENEMY_WALK_COUNT: Record<string, number> = { grunt: 8, charger: 8, caster: 8, boss: 8, wolf: 4, guard: 8, lancer: 4, shaman: 4 };
+const ENEMY_WALK_COUNT: Record<string, number> = { grunt: 8, charger: 8, caster: 8, boss: 8, boss2: 6, boss3: 8, wolf: 4, guard: 8, lancer: 4, shaman: 4 };
 const enemyWalk: Record<string, Spr[]> = Object.fromEntries(
   Object.keys(ENEMY_WALK_COUNT).map((k) => [
     k,
@@ -93,6 +97,8 @@ const ENEMY_WALK_ANCHOR: Record<string, { cx: number; foot: number; size: number
   boss: { cx: 47, foot: 74, size: 88 },
   wolf: { cx: 39, foot: 61, size: 88 },
   guard: { cx: 49, foot: 76, size: 92 },
+  boss2: { cx: 30, foot: 59, size: 64 },
+  boss3: { cx: 33, foot: 60, size: 64 },
   lancer: { cx: 32, foot: 63, size: 64 },
   shaman: { cx: 31, foot: 60, size: 64 },
 };
@@ -146,6 +152,26 @@ const ENEMY_ATK: Record<string, EnemyAtkCfg> = {
     size: 64,
     anchors: [{ cx: 31, foot: 60 }],
   },
+  boss2: {
+    // 공허 사신 키포즈 2장(create-character-state): 0 낫 치켜들기(예비), 1 낮게 휩쓸기(타격)
+    frames: [0, 1].map((i) => loadSpr(`/sprites/boss2_atk_${i}.png`)),
+    windup: 1,
+    size: 80,
+    anchors: [
+      { cx: 40, foot: 69 },
+      { cx: 41, foot: 71 },
+    ],
+  },
+  boss3: {
+    // 잿불 거인 키포즈 2장: 0 두 주먹 치켜들기(예비), 1 지면 강타(타격, 웅크림)
+    frames: [0, 1].map((i) => loadSpr(`/sprites/boss3_atk_${i}.png`)),
+    windup: 1,
+    size: 80,
+    anchors: [
+      { cx: 40, foot: 69 },
+      { cx: 44, foot: 79 },
+    ],
+  },
   boss: {
     // Create State 키포즈 2장: 0 대검 치켜들기(예비), 1 내려찍기(타격, 웅크려서 발이 낮음)
     frames: [0, 1].map((i) => loadSpr(`/sprites/boss_atk_${i}.png`)),
@@ -176,19 +202,23 @@ function capsule(
   ctx.stroke();
 }
 
-// 원경 배경 이미지 (Retro Diffusion, 1920x1080 → 960x540 스케일)
-const bgFar = new Image();
-let bgFarReady = false;
-bgFar.onload = () => (bgFarReady = true);
-bgFar.src = "/sprites/bg_rift.png";
+// 스테이지별 원경 배경: 웨이브 1~3 균열 협곡, 4~6 불타는 폐허, 7~10 보랏빛 심연 성채
+function loadBg(src: string) {
+  const o = { img: new Image(), ready: false };
+  o.img.onload = () => (o.ready = true);
+  o.img.src = src;
+  return o;
+}
+const bgFars = [loadBg("/sprites/bg_rift.png"), loadBg("/sprites/bg_ember.png"), loadBg("/sprites/bg_void.png")];
 // 무대 세트: 기둥+원근 바닥 일체 이미지 (체커보드 배경 키잉됨) — 기둥 사이로 원경이 보임
 const bgMid = new Image();
 let bgMidReady = false;
 bgMid.onload = () => (bgMidReady = true);
 bgMid.src = "/sprites/bg_temple.png";
 
-export function drawBackground(ctx: CanvasRenderingContext2D, camX: number, cycle = 0) {
-  if (bgFarReady) {
+export function drawBackground(ctx: CanvasRenderingContext2D, camX: number, cycle = 0, stage = 0) {
+  const far = bgFars[stage]?.ready ? bgFars[stage].img : bgFars[0].ready ? bgFars[0].img : null;
+  if (far) {
     // 이미지 배경: 미러 타일링(홀수 타일 좌우 반전)으로 이음매 제거, 패럴럭스 0.22
     const off = camX * 0.22;
     const w = VW;
@@ -198,10 +228,10 @@ export function drawBackground(ctx: CanvasRenderingContext2D, camX: number, cycl
         ctx.save();
         ctx.translate(dx + w, 0);
         ctx.scale(-1, 1);
-        ctx.drawImage(bgFar, 0, 0, w, VH);
+        ctx.drawImage(far, 0, 0, w, VH);
         ctx.restore();
       } else {
-        ctx.drawImage(bgFar, dx, 0, w, VH);
+        ctx.drawImage(far, dx, 0, w, VH);
       }
     }
     // 대기 원근: 원경 하단을 어둠으로 가라앉혀 지평선에서 무대 바닥과 경계가 안 생기게
@@ -289,7 +319,7 @@ export function drawBackground(ctx: CanvasRenderingContext2D, camX: number, cycl
     floor.addColorStop(0, "#141a2c");
     floor.addColorStop(1, "#0a0d16");
     ctx.fillStyle = floor;
-    if (bgFarReady) {
+    if (far) {
       ctx.globalAlpha = 0.82;
       ctx.fillRect(0, GROUND_BACK, VW, VH - GROUND_BACK);
       ctx.globalAlpha = 1;
@@ -855,7 +885,7 @@ function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy, camX: number) {
   ctx.restore();
 
   // HP 바 (보스 제외)
-  if (e.kind !== "boss" && e.hp < e.maxHp) {
+  if (!e.isBoss && e.hp < e.maxHp) {
     const topY = gy - 60 * S - 6;
     ctx.fillStyle = "rgba(0,0,0,0.6)";
     ctx.fillRect(sx - 15, topY - 1, 30, 5);
@@ -885,7 +915,7 @@ function drawEnemyShapes(ctx: CanvasRenderingContext2D, e: Enemy, camX: number) 
   const eye = flash ? "#ffffff" : e.eye;
   const wp = e.walkPhase;
 
-  if (e.kind === "boss") {
+  if (e.isBoss) {
     // 거대 실루엣 + 갈라진 갑주
     const h = 92;
     // 다리
@@ -989,7 +1019,7 @@ function drawEnemyShapes(ctx: CanvasRenderingContext2D, e: Enemy, camX: number) 
   }
 
   // 적 HP 바 (보스 제외 소형)
-  if (e.kind !== "boss" && e.hp < e.maxHp) {
+  if (!e.isBoss && e.hp < e.maxHp) {
     ctx.fillStyle = "rgba(0,0,0,0.6)";
     ctx.fillRect(-14, -e.radius * 3.4 - 4, 28, 4);
     ctx.fillStyle = "#ff6b6b";
@@ -1057,7 +1087,8 @@ export function drawScene(ctx: CanvasRenderingContext2D, w: World) {
   const camY = w.cam.oy;
   ctx.save();
   ctx.translate(0, camY);
-  drawBackground(ctx, camX, Math.floor((w.wave - 1) / 10));
+  const widx = (w.wave - 1) % 10;
+  drawBackground(ctx, camX, Math.floor((w.wave - 1) / 10), widx < 3 ? 0 : widx < 6 ? 1 : 2);
 
   // 깊이 정렬: 뒤(z 큼) 먼저
   const ents: Fighter[] = [w.player, ...w.enemies];
