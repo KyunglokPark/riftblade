@@ -1,7 +1,7 @@
 // 게임 월드: 엔티티 오케스트레이션 · 히트 판정 · 히트스톱 · 웨이브/보스
 
 import { Arena, Fighter, ActiveAttack } from "./fighter";
-import { Player } from "./player";
+import { Player, PlayerClass } from "./player";
 import { Enemy, EnemyKind } from "./enemy";
 import { Particles } from "../core/particles";
 import { Camera } from "../core/camera";
@@ -14,6 +14,23 @@ export interface Drop {
   z: number;
   life: number;
   dead: boolean;
+}
+
+// 플레이어 투사체 (화살/매직볼트)
+export interface PBolt {
+  x: number;
+  z: number;
+  vx: number;
+  vz: number;
+  h: number; // 지면 위 높이 (렌더용)
+  dmg: number;
+  life: number;
+  dead: boolean;
+  pierce: number;
+  explode?: { r: number; dmg: number };
+  color: string;
+  orb: boolean;
+  hitIds: Set<number>;
 }
 
 export interface Bolt {
@@ -47,6 +64,7 @@ export class World implements Arena {
   player: Player;
   enemies: Fighter[] = [];
   bolts: Bolt[] = [];
+  pbolts: PBolt[] = [];
   drops: Drop[] = []; // 체력 포션
   particles = new Particles();
   cam = new Camera();
@@ -75,8 +93,8 @@ export class World implements Arena {
   timeMs = 0;
   hitFlash = 0; // 피격 시 화면 붉은 플래시
 
-  constructor() {
-    this.player = new Player(200, 70);
+  constructor(cls: PlayerClass = "knight") {
+    this.player = new Player(200, 70, cls);
     this.cam.x = 0;
     this.nextWave();
   }
@@ -99,12 +117,36 @@ export class World implements Arena {
   spawnBolt(x: number, z: number, vx: number, dmg: number) {
     this.bolts.push({ x, z, vx, dmg, life: 150, dead: false });
   }
+  spawnPlayerBolt(
+    x: number,
+    z: number,
+    vx: number,
+    dmg: number,
+    opts: { vz?: number; pierce?: number; explode?: { r: number; dmg: number }; color?: string; orb?: boolean; h?: number } = {}
+  ) {
+    this.pbolts.push({
+      x,
+      z,
+      vx,
+      vz: opts.vz ?? 0,
+      h: opts.h ?? 30,
+      dmg,
+      life: 70,
+      dead: false,
+      pierce: opts.pierce ?? 1,
+      explode: opts.explode,
+      color: opts.color ?? "#cfffe0",
+      orb: opts.orb ?? false,
+      hitIds: new Set(),
+    });
+  }
 
   /** 디버그/테스트: 해당 웨이브(1부터 셈)로 즉시 점프 — 판 정리 후 새로 소환, 체력·MP 회복 */
   jumpToWave(n: number) {
     this.wave = Math.max(0, Math.floor(n) - 1);
     this.enemies = [];
     this.bolts = [];
+    this.pbolts = [];
     this.drops = [];
     this.betweenT = 0;
     this.player.hp = this.player.maxHp;
@@ -175,7 +217,16 @@ export class World implements Arena {
       this.particles.text(this.player.x, pgy, "CHECKPOINT", "#8ef0c0", 1.3);
       this.particles.ring(this.player.x, pgy + 26, "rgba(142,240,192,0.8)", 14, 10, 30);
       this.particles.glow(this.player.x, pgy + 26, "rgba(142,240,192,0.5)", 50, 16);
+      sfx.checkpoint();
     }
+  }
+
+  /** 현재 상황에 맞는 BGM 테마 (보스 생존 시 보스 테마 우선) */
+  musicTheme(): "canyon" | "ember" | "void" | "boss" {
+    const bossAlive = this.enemies.some((e) => !e.dead && e instanceof Enemy && e.isBoss);
+    if (bossAlive) return "boss";
+    const widx = (this.wave - 1) % 10;
+    return widx < 3 ? "canyon" : widx < 6 ? "ember" : "void";
   }
 
   /** 사망 후 마지막 체크포인트에서 부활 */
@@ -214,7 +265,7 @@ export class World implements Arena {
     this.particles.text(this.player.x, gy, `+${heal}`, "#7dff9a", 1.3);
     this.particles.glow(this.player.x, gy + 10, "rgba(120,255,150,0.6)", 36, 12);
     this.particles.spark(this.player.x, gy + 10, 10, "#7dff9a", 6);
-    sfx.launch();
+    sfx.potion();
   }
 
   private aliveEnemies() {
@@ -271,6 +322,7 @@ export class World implements Arena {
     for (const e of this.enemies) e.update(this);
     // 투사체
     this.updateBolts();
+    this.updatePlayerBolts();
     // 포션
     this.updateDrops();
 
@@ -331,6 +383,108 @@ export class World implements Arena {
       }
     }
     this.bolts = this.bolts.filter((b) => !b.dead);
+  }
+
+  private updatePlayerBolts() {
+    for (const b of this.pbolts) {
+      b.x += b.vx;
+      b.z += b.vz;
+      b.life--;
+      if (b.life <= 0 || b.x < -40 || b.x > STAGE_LEN + 40 || b.z < 0 || b.z > 180) b.dead = true;
+      if (b.dead) continue;
+      for (const e of this.enemies) {
+        if (e.dead || !(e instanceof Enemy) || b.hitIds.has(e.id)) continue;
+        if (!beltHit(b.x, b.z, e.x, e.z, 16 + e.radius, 26) || e.air > 90) continue;
+        b.hitIds.add(e.id);
+        // 수호병 정면 가드: 화살·볼트도 방패에 막힌다
+        if (e.blocksFrontal(b.x - b.vx * 4)) {
+          const ggy = groundY(e.z) - e.air - 30;
+          this.particles.spark(e.x + e.facing * 16, ggy, 5, "#cfd6e4", 5);
+          this.particles.text(e.x, ggy - 12, "GUARD", "#cfd6e4", 0.85);
+          sfx.hit();
+          if (!b.explode) {
+            b.pierce--;
+            if (b.pierce <= 0) b.dead = true;
+          } else {
+            this.explodeBolt(b);
+          }
+          if (b.dead) break;
+          continue;
+        }
+        if (b.explode) {
+          this.explodeBolt(b);
+          break;
+        }
+        const crit = e.parryStunned && e.hitstun > 0;
+        const atk: ActiveAttack = {
+          x: b.x,
+          z: b.z,
+          rx: 0,
+          rz: 0,
+          dmg: crit ? Math.round(b.dmg * 1.5) : b.dmg,
+          kbx: 2,
+          kbz: 0,
+          launch: 0,
+          hitstun: 10,
+          hitstop: 2,
+          shake: 3,
+          hitId: `pb-${this.timeMs}-${e.id}`,
+        };
+        const wasAlive = !e.dead;
+        if (e.hurt(atk, b.x - b.vx, this)) {
+          this.onPlayerLand(atk, e, crit);
+          // 궁사: 명중마다 MP 회복
+          if (this.player.cls === "archer") this.player.mp = Math.min(this.player.maxMp, this.player.mp + 4);
+          if (wasAlive && e.dead) this.onEnemyDeath(e);
+        }
+        b.pierce--;
+        if (b.pierce <= 0) {
+          b.dead = true;
+          break;
+        }
+      }
+    }
+    this.pbolts = this.pbolts.filter((b) => !b.dead);
+  }
+
+  /** 폭발형 투사체: 반경 내 모든 적에게 광역 피해 */
+  private explodeBolt(b: PBolt) {
+    b.dead = true;
+    const ex = b.explode!;
+    const gy = groundY(b.z) - b.h;
+    this.particles.ring(b.x, gy, "rgba(255,170,90,0.95)", 20, 12, ex.r * 0.35);
+    this.particles.ring(b.x, gy, "rgba(255,230,160,0.7)", 10, 14, ex.r * 0.28);
+    this.particles.spark(b.x, gy, 22, "#ffb060", 10);
+    this.particles.ember(b.x, gy, 14, "rgba(255,150,60,0.9)");
+    this.cam.shake(10);
+    this.freeze(4);
+    sfx.nova();
+    for (const e of this.enemies) {
+      if (e.dead || !(e instanceof Enemy)) continue;
+      if (!beltHit(b.x, b.z, e.x, e.z, ex.r, ex.r * 0.6)) continue;
+      const crit = e.parryStunned && e.hitstun > 0;
+      const atk: ActiveAttack = {
+        x: b.x,
+        z: b.z,
+        rx: 0,
+        rz: 0,
+        dmg: crit ? Math.round(ex.dmg * 1.5) : ex.dmg,
+        kbx: 7,
+        kbz: 1,
+        launch: 4,
+        hitstun: 18,
+        hitstop: 4,
+        shake: 6,
+        hitId: `pbx-${this.timeMs}-${e.id}`,
+        sfx: "nova",
+      };
+      const wasAlive = !e.dead;
+      if (e.hurt(atk, b.x, this)) {
+        this.onPlayerLand(atk, e, crit);
+        if (this.player.cls === "archer") this.player.mp = Math.min(this.player.maxMp, this.player.mp + 4);
+        if (wasAlive && e.dead) this.onEnemyDeath(e);
+      }
+    }
   }
 
   private updateDrops() {
@@ -450,7 +604,7 @@ export class World implements Arena {
     this.particles.text(mx, gy - 14, "PARRY!", "#ffe08a", 1.4);
     this.freeze(9);
     this.cam.shake(9);
-    sfx.heavy();
+    sfx.parry();
     return true;
   }
 

@@ -2,7 +2,9 @@
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
+let musicBus: GainNode | null = null; // BGM 전용 버스 (볼륨 분리)
 let enabled = true;
+let onReady: (() => void) | null = null;
 
 export function initAudio(): void {
   const resume = () => {
@@ -12,11 +14,25 @@ export function initAudio(): void {
       master = ctx.createGain();
       master.gain.value = 0.5;
       master.connect(ctx.destination);
+      musicBus = ctx.createGain();
+      musicBus.gain.value = 0.42;
+      musicBus.connect(master);
+      onReady?.();
     }
     if (ctx.state === "suspended") ctx.resume();
   };
   window.addEventListener("pointerdown", resume);
   window.addEventListener("keydown", resume);
+}
+
+/** BGM 시퀀서가 사용할 컨텍스트/버스 — 첫 입력 전엔 null */
+export function audioNodes(): { ctx: AudioContext; music: GainNode } | null {
+  return ctx && musicBus ? { ctx, music: musicBus } : null;
+}
+/** 오디오 컨텍스트가 준비되면 호출될 콜백 (BGM 시작용) */
+export function setAudioReady(cb: () => void) {
+  onReady = cb;
+  if (ctx) cb();
 }
 
 export function toggleMute(): boolean {
@@ -117,6 +133,33 @@ export const sfx = {
     [523, 659, 784, 1047].forEach((f, i) =>
       setTimeout(() => tone(f, 0.3, "triangle", 0.2), i * 130)
     );
+  },
+  arrow() {
+    // 활: 시위 퉁김 + 바람 가르는 소리
+    noise(0.08, 0.16, 2000, 9000);
+    tone(880, 0.06, "triangle", 0.1, 440);
+  },
+  magic() {
+    // 매직볼트: 웅웅거리는 발사음
+    tone(320, 0.18, "sine", 0.14, 640);
+    tone(480, 0.14, "triangle", 0.08, 720);
+    noise(0.1, 0.1, 800, 4000);
+  },
+  potion() {
+    // 포션: 보글보글 + 상승음
+    tone(520, 0.08, "sine", 0.12, 660);
+    setTimeout(() => tone(660, 0.08, "sine", 0.12, 820), 70);
+    setTimeout(() => tone(820, 0.12, "sine", 0.12, 1040), 140);
+  },
+  parry() {
+    // 패링: 금속성 챙! + 여운
+    tone(1320, 0.18, "triangle", 0.2, 990);
+    tone(2640, 0.1, "sine", 0.08, 1980);
+    noise(0.06, 0.25, 3000, 10000);
+  },
+  checkpoint() {
+    // 체크포인트: 포근한 상승 아르페지오
+    [392, 494, 587, 784].forEach((f, i) => setTimeout(() => tone(f, 0.25, "triangle", 0.14), i * 90));
   },
   lose() {
     [440, 349, 262].forEach((f, i) =>

@@ -2,8 +2,10 @@
 
 import "./style.css";
 import { initInput, pressed, endInputFrame } from "./core/input";
-import { initAudio, sfx } from "./core/audio";
+import { initAudio, sfx, toggleMute } from "./core/audio";
+import { playMusic, stopMusic } from "./core/music";
 import { World } from "./game/world";
+import type { PlayerClass } from "./game/player";
 import { drawScene, drawBackground } from "./game/render";
 import { drawHud } from "./game/hud";
 import { VW, VH } from "./core/util";
@@ -14,14 +16,58 @@ const ctx = canvas.getContext("2d")!;
 initInput();
 initAudio();
 
-type State = "title" | "play" | "pause" | "win" | "lose";
+type State = "title" | "select" | "play" | "pause" | "win" | "lose";
 let state: State = "title";
 let world = new World();
 let titleT = 0;
 let loseT = 0; // 사망 연출 경과 틱
+let muteMsgT = 0; // 음소거 토글 표시
+let muted = false;
 
-function startGame() {
-  world = new World();
+// ---- 캐릭터 선택 ----
+interface ClassCard {
+  cls: PlayerClass;
+  name: string;
+  title: string;
+  lines: string[];
+  img: HTMLImageElement;
+  imgSize: number; // 소스 캔버스 크기
+}
+function cardImg(src: string) {
+  const i = new Image();
+  i.src = src;
+  return i;
+}
+const CLASS_CARDS: ClassCard[] = [
+  {
+    cls: "knight",
+    name: "파열검사",
+    title: "근접 콤보 · 패링의 달인",
+    lines: ["HP 130 · 검격 콤보와 어퍼·공중기", "패링으로 적을 스턴시키고 MP 수급", "U 파열참 · I 천공참 · O 파열노바"],
+    img: cardImg("/sprites/hero.png"),
+    imgSize: 64,
+  },
+  {
+    cls: "archer",
+    name: "바람 사수",
+    title: "민첩한 원거리 연사",
+    lines: ["HP 95 · 가장 빠른 발놀림", "화살 명중마다 MP +4", "U 관통사격 · I 화살비 · O 폭발화살"],
+    img: cardImg("/sprites/archer.png"),
+    imgSize: 64,
+  },
+  {
+    cls: "mage",
+    name: "균열 술사",
+    title: "강력한 마법 · 점멸 회피",
+    lines: ["HP 80 · MP 130, 자연회복 최속", "묵직한 매직볼트와 광역 마법", "U 화염구 · I 점멸 · O 비전폭풍"],
+    img: cardImg("/sprites/mage.png"),
+    imgSize: 64,
+  },
+];
+let selIdx = 0;
+
+function startGame(cls: PlayerClass) {
+  world = new World(cls);
   state = "play";
   sfx.ui();
 }
@@ -29,8 +75,13 @@ function startGame() {
 // 웨이브 점프 치트: 플레이 중 Enter → 숫자 입력 → Enter (Esc 취소)
 let waveJumpBuf: string | null = null;
 window.addEventListener("keydown", (e) => {
-  // 사망 화면에서 Esc → 타이틀로
-  if (state === "lose" && e.key === "Escape") {
+  if (e.code === "KeyM") {
+    muted = !toggleMute();
+    muteMsgT = 90;
+    return;
+  }
+  // 사망/선택 화면에서 Esc → 타이틀로
+  if ((state === "lose" || state === "select") && e.key === "Escape") {
     state = "title";
     return;
   }
@@ -60,8 +111,28 @@ window.addEventListener("keydown", (e) => {
 
 function tick() {
   titleT++;
+  if (muteMsgT > 0) muteMsgT--;
+  // 상태별 BGM
+  if (state === "title" || state === "select") playMusic("canyon");
+  else if (state === "play" || state === "pause") playMusic(world.musicTheme());
+  else if (state === "lose") stopMusic(); // YOU DIED는 정적 속에서
   if (state === "title") {
-    if (pressed("start") || pressed("attack")) startGame();
+    if (pressed("start") || pressed("attack")) {
+      state = "select";
+      sfx.ui();
+    }
+    return;
+  }
+  if (state === "select") {
+    if (pressed("left")) {
+      selIdx = (selIdx + CLASS_CARDS.length - 1) % CLASS_CARDS.length;
+      sfx.ui();
+    }
+    if (pressed("right")) {
+      selIdx = (selIdx + 1) % CLASS_CARDS.length;
+      sfx.ui();
+    }
+    if (pressed("start") || pressed("attack")) startGame(CLASS_CARDS[selIdx].cls);
     return;
   }
   if (state === "win" || state === "lose") {
@@ -104,6 +175,12 @@ function render() {
   ctx.clearRect(0, 0, VW, VH);
   if (state === "title") {
     drawTitle();
+    drawMuteMsg();
+    return;
+  }
+  if (state === "select") {
+    drawSelect();
+    drawMuteMsg();
     return;
   }
   drawScene(ctx, world);
@@ -114,6 +191,7 @@ function render() {
   if (state === "pause") overlay("일시정지", "P / Enter 로 계속");
   if (state === "win") overlay("균열 봉인 완료!", `점수 ${world.score} · 최대 콤보 ${world.maxCombo}\nEnter 로 타이틀`, "#8ef0c0");
   if (state === "lose") drawYouDie();
+  drawMuteMsg();
 }
 
 function drawTitle() {
@@ -159,12 +237,91 @@ function drawTitle() {
   ctx.restore();
 }
 
+function drawSelect() {
+  drawBackground(ctx, titleT * 0.4);
+  ctx.fillStyle = "rgba(4,6,14,0.55)";
+  ctx.fillRect(0, 0, VW, VH);
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#dff9ff";
+  ctx.shadowColor = "#5cf0ff";
+  ctx.shadowBlur = 10;
+  ctx.font = "900 36px 'Segoe UI', sans-serif";
+  ctx.fillText("영웅을 선택하라", VW / 2, 80);
+  ctx.shadowBlur = 0;
+
+  const cardW = 240;
+  const cardH = 330;
+  const gap = 42;
+  const total = cardW * 3 + gap * 2;
+  const x0 = (VW - total) / 2;
+  const y0 = 120;
+  ctx.imageSmoothingEnabled = false;
+
+  CLASS_CARDS.forEach((c, i) => {
+    const x = x0 + i * (cardW + gap);
+    const sel = i === selIdx;
+    // 카드 배경
+    ctx.fillStyle = sel ? "rgba(24,46,66,0.92)" : "rgba(12,18,32,0.85)";
+    ctx.fillRect(x, y0, cardW, cardH);
+    ctx.lineWidth = sel ? 3 : 1;
+    ctx.strokeStyle = sel ? "#5cf0ff" : "rgba(120,150,190,0.4)";
+    if (sel) {
+      ctx.shadowColor = "#5cf0ff";
+      ctx.shadowBlur = 18;
+    }
+    ctx.strokeRect(x, y0, cardW, cardH);
+    ctx.shadowBlur = 0;
+
+    // 스프라이트 (선택 시 둥실거림)
+    const bob = sel ? Math.sin(titleT * 0.08) * 4 : 0;
+    const scale = sel ? 2.3 : 2.0;
+    const ds = c.imgSize * scale;
+    if (c.img.complete && c.img.naturalWidth > 0) {
+      ctx.drawImage(c.img, x + cardW / 2 - ds / 2, y0 + 118 - ds * 0.78 + bob, ds, ds);
+    }
+
+    // 이름/설명
+    ctx.fillStyle = sel ? "#5cf0ff" : "#dff9ff";
+    ctx.font = "900 24px 'Segoe UI', sans-serif";
+    ctx.fillText(c.name, x + cardW / 2, y0 + 172);
+    ctx.fillStyle = "rgba(220,240,255,0.9)";
+    ctx.font = "700 13px 'Segoe UI', sans-serif";
+    ctx.fillText(c.title, x + cardW / 2, y0 + 196);
+    ctx.font = "500 12px 'Segoe UI', sans-serif";
+    ctx.fillStyle = "rgba(190,220,255,0.75)";
+    c.lines.forEach((l, j) => ctx.fillText(l, x + cardW / 2, y0 + 226 + j * 22));
+
+    if (sel && Math.floor(titleT / 30) % 2 === 0) {
+      ctx.fillStyle = "#ffd76a";
+      ctx.font = "800 14px 'Segoe UI', sans-serif";
+      ctx.fillText("▶ Enter 로 출전 ◀", x + cardW / 2, y0 + cardH - 16);
+    }
+  });
+
+  ctx.fillStyle = "rgba(160,190,230,0.6)";
+  ctx.font = "500 13px 'Segoe UI', sans-serif";
+  ctx.fillText("← → 선택 · Enter / J 시작 · Esc 타이틀", VW / 2, y0 + cardH + 44);
+  ctx.restore();
+}
+
 function drawControlsHint() {
   ctx.save();
   ctx.textAlign = "right";
   ctx.fillStyle = "rgba(160,190,230,0.5)";
   ctx.font = "500 11px 'Segoe UI', sans-serif";
-  ctx.fillText("이동 WASD/화살표 · 공격 J · 점프 K · 대시 L · 스킬 U I O · 포션 H · 일시정지 P", VW - 12, VH - 12);
+  ctx.fillText("이동 WASD/화살표 · 공격 J · 점프 K · 대시 L · 스킬 U I O · 포션 H · 일시정지 P · 음소거 M", VW - 12, VH - 12);
+  ctx.restore();
+}
+
+function drawMuteMsg() {
+  if (muteMsgT <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, muteMsgT / 20);
+  ctx.textAlign = "center";
+  ctx.fillStyle = muted ? "#ff8a8a" : "#8ef0c0";
+  ctx.font = "800 16px 'Segoe UI', sans-serif";
+  ctx.fillText(muted ? "🔇 음소거" : "🔊 소리 켜짐", VW / 2, 86);
   ctx.restore();
 }
 

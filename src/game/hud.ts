@@ -22,14 +22,28 @@ function bar(
   ctx.fillRect(x, y, w * Math.max(0, Math.min(1, frac)), h);
 }
 
-const SKILLS = [
-  { key: "U", name: "파열참", cost: 22 },
-  { key: "I", name: "천공참", cost: 30 },
-  { key: "O", name: "파열노바", cost: 42 },
-];
+const CLASS_SKILLS: Record<string, { key: string; name: string; cost: number }[]> = {
+  knight: [
+    { key: "U", name: "파열참", cost: 22 },
+    { key: "I", name: "천공참", cost: 30 },
+    { key: "O", name: "파열노바", cost: 42 },
+  ],
+  archer: [
+    { key: "U", name: "관통사격", cost: 22 },
+    { key: "I", name: "화살비", cost: 30 },
+    { key: "O", name: "폭발화살", cost: 42 },
+  ],
+  mage: [
+    { key: "U", name: "화염구", cost: 22 },
+    { key: "I", name: "점멸", cost: 30 },
+    { key: "O", name: "비전폭풍", cost: 42 },
+  ],
+};
+const CLASS_NAME: Record<string, string> = { knight: "파열검사", archer: "바람 사수", mage: "균열 술사" };
 
 export function drawHud(ctx: CanvasRenderingContext2D, w: World) {
   const p = w.player;
+  const SKILLS = CLASS_SKILLS[p.cls] ?? CLASS_SKILLS.knight;
 
   // 좌상단 초상 + HP/MP
   ctx.fillStyle = "rgba(10,14,26,0.7)";
@@ -39,7 +53,7 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: World) {
   ctx.fillStyle = "#dff9ff";
   ctx.font = "700 14px 'Segoe UI', sans-serif";
   ctx.textAlign = "left";
-  ctx.fillText("파열검사", 22, 30);
+  ctx.fillText(CLASS_NAME[p.cls] ?? "파열검사", 22, 30);
   bar(ctx, 22, 38, 230, 12, p.hp / p.maxHp, "#ff5b6e");
   bar(ctx, 22, 56, 230, 8, p.mp / p.maxMp, "#5cc8ff");
 
@@ -72,24 +86,26 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: World) {
     ctx.restore();
   }
 
-  // 스킬 아이콘 (하단 좌측)
+  // 스킬 아이콘 (좌측 세로 — 플레이어 패널 아래, 전장을 가리지 않게)
   const sx = 16;
-  const sy = 470;
+  const sy = 96;
+  const STEP = 60;
   const cds = [p.cd1, p.cd2, p.cd3];
   const cdMax = [66, 120, 190];
   for (let i = 0; i < 3; i++) {
-    const x = sx + i * 66;
+    const x = sx;
+    const y = sy + i * STEP;
     const ready = cds[i] <= 0 && p.mp >= SKILLS[i].cost;
-    ctx.fillStyle = ready ? "rgba(30,60,90,0.85)" : "rgba(20,26,40,0.85)";
-    ctx.fillRect(x, sy, 58, 54);
+    ctx.fillStyle = ready ? "rgba(30,60,90,0.8)" : "rgba(20,26,40,0.8)";
+    ctx.fillRect(x, y, 58, 54);
     ctx.strokeStyle = ready ? "#5cf0ff" : "rgba(120,150,190,0.4)";
     ctx.lineWidth = ready ? 2 : 1;
-    ctx.strokeRect(x, sy, 58, 54);
+    ctx.strokeRect(x, y, 58, 54);
     // 쿨다운 오버레이
     if (cds[i] > 0) {
       const fr = cds[i] / cdMax[i];
       ctx.fillStyle = "rgba(0,0,0,0.6)";
-      ctx.fillRect(x, sy, 58, 54 * fr);
+      ctx.fillRect(x, y, 58, 54 * fr);
     }
     ctx.textAlign = "center";
     if (cds[i] > 0) {
@@ -97,38 +113,39 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: World) {
       const sec = cds[i] / 60;
       ctx.fillStyle = "#ffd76a";
       ctx.font = "900 16px 'Segoe UI', sans-serif";
-      ctx.fillText(sec >= 10 ? `${Math.ceil(sec)}` : sec.toFixed(1), x + 29, sy + 24);
+      ctx.fillText(sec >= 10 ? `${Math.ceil(sec)}` : sec.toFixed(1), x + 29, y + 24);
     } else {
       ctx.fillStyle = ready ? "#dff9ff" : "rgba(200,220,240,0.5)";
       ctx.font = "900 18px 'Segoe UI', sans-serif";
-      ctx.fillText(SKILLS[i].key, x + 29, sy + 24);
+      ctx.fillText(SKILLS[i].key, x + 29, y + 24);
     }
     ctx.font = "600 10px 'Segoe UI', sans-serif";
-    ctx.fillText(SKILLS[i].name, x + 29, sy + 40);
+    ctx.fillText(SKILLS[i].name, x + 29, y + 40);
     ctx.font = "600 9px 'Segoe UI', sans-serif";
     ctx.fillStyle = p.mp >= SKILLS[i].cost ? "#7fd4ff" : "#ff8a8a";
-    ctx.fillText(`${SKILLS[i].cost}MP`, x + 29, sy + 50);
+    ctx.fillText(`${SKILLS[i].cost}MP`, x + 29, y + 50);
   }
 
-  // 포션 슬롯 (스킬 옆, H키)
+  // 포션 슬롯 (스킬 아래, H키)
   {
-    const x = sx + 3 * 66;
+    const x = sx;
+    const y = sy + 3 * STEP;
     const has = w.potions > 0;
-    ctx.fillStyle = has ? "rgba(60,30,40,0.85)" : "rgba(20,26,40,0.85)";
-    ctx.fillRect(x, sy, 58, 54);
+    ctx.fillStyle = has ? "rgba(60,30,40,0.8)" : "rgba(20,26,40,0.8)";
+    ctx.fillRect(x, y, 58, 54);
     ctx.strokeStyle = has ? "#ff8a9a" : "rgba(120,150,190,0.4)";
     ctx.lineWidth = has ? 2 : 1;
-    ctx.strokeRect(x, sy, 58, 54);
+    ctx.strokeRect(x, y, 58, 54);
     // 작은 플라스크
     ctx.fillStyle = has ? "#ff5b6e" : "rgba(160,120,130,0.5)";
-    ctx.fillRect(x + 23, sy + 14, 12, 14);
-    ctx.fillRect(x + 26, sy + 9, 6, 6);
+    ctx.fillRect(x + 23, y + 14, 12, 14);
+    ctx.fillRect(x + 26, y + 9, 6, 6);
     ctx.textAlign = "center";
     ctx.fillStyle = has ? "#dff9ff" : "rgba(200,220,240,0.5)";
     ctx.font = "900 12px 'Segoe UI', sans-serif";
-    ctx.fillText(`x${w.potions}`, x + 29, sy + 40);
+    ctx.fillText(`x${w.potions}`, x + 29, y + 40);
     ctx.font = "600 10px 'Segoe UI', sans-serif";
-    ctx.fillText("H 포션", x + 29, sy + 50);
+    ctx.fillText("H 포션", x + 29, y + 50);
   }
 
   // 보스 체력바

@@ -60,6 +60,28 @@ const HERO_JUMP_ANCHOR = [
   { cx: 42, foot: 54 },
   { cx: 44, foot: 75 },
 ];
+// 궁사/법사 스프라이트 세트 (64 기본·걷기, 80 공격 키포즈 — 실측 앵커)
+const RANGED_HERO = {
+  archer: {
+    base: loadSpr("/sprites/archer.png"),
+    walk: [0, 1, 2, 3, 4, 5].map((i) => loadSpr(`/sprites/archer_walk_${i}.png`)),
+    atkW: loadSpr("/sprites/archer_atk_windup.png"),
+    atkS: loadSpr("/sprites/archer_atk_strike.png"),
+    baseA: { cx: 33, foot: 63 },
+    walkA: { cx: 33, foot: 63 },
+    atkA: { cx: 42, foot: 71 },
+  },
+  mage: {
+    base: loadSpr("/sprites/mage.png"),
+    walk: [0, 1, 2, 3, 4, 5].map((i) => loadSpr(`/sprites/mage_walk_${i}.png`)),
+    atkW: loadSpr("/sprites/mage_atk_windup.png"),
+    atkS: loadSpr("/sprites/mage_atk_strike.png"),
+    baseA: { cx: 31, foot: 61 },
+    walkA: { cx: 33, foot: 61 },
+    atkA: { cx: 42, foot: 69 },
+  },
+};
+
 const enemySpr: Record<string, Spr> = {
   grunt: loadSpr("/sprites/grunt.png"),
   charger: loadSpr("/sprites/charger.png"),
@@ -381,7 +403,100 @@ function shadow(ctx: CanvasRenderingContext2D, f: Fighter, camX: number) {
   ctx.restore();
 }
 
+// 궁사/법사 렌더: 기본/걷기/발사(예비→발사 키포즈)/대시/사망
+function drawRangedHero(ctx: CanvasRenderingContext2D, p: Player, camX: number) {
+  const set = RANGED_HERO[p.cls as "archer" | "mage"];
+  const sx = p.x - camX;
+  const gy = groundY(p.z) - p.air;
+  const sc = depthScale(p.z);
+  const f = p.facing;
+  const S = SPRITE_SCALE * sc;
+  const st = p.state;
+  if (!set.base.ready) return;
+
+  const archer = p.cls === "archer";
+  // 발사/스킬 상태별 예비동작 길이 → 예비(활시위/차징) 포즈와 발사 포즈 전환
+  const shootWindups: Record<string, number> = {
+    shoot: archer ? 8 : 14,
+    skill1: archer ? 10 : 14,
+    skill2: archer ? 12 : 2,
+    skill3: archer ? 14 : 16,
+  };
+
+  let spr = set.base;
+  let a = set.baseA;
+  let size = 64;
+  let lean = 0;
+  let sxs = 1;
+  let sys = 1;
+
+  if (st in shootWindups) {
+    const strike = p.t >= shootWindups[st];
+    spr = strike ? set.atkS : set.atkW;
+    a = set.atkA;
+    size = 80;
+    if (strike) {
+      lean = f * 0.08;
+      sxs = 1.05;
+    } else {
+      lean = -f * 0.05;
+    }
+  } else if (st === "run" && set.walk[0].ready) {
+    spr = set.walk[Math.floor(p.walkPhase / WALK_FRAME_PHASE) % set.walk.length];
+    a = set.walkA;
+  } else if (st === "dash") {
+    lean = f * 0.22;
+    sxs = 1.1;
+    sys = 0.94;
+  } else if (st === "air" || p.airborne) {
+    lean = f * 0.08;
+  } else {
+    // idle 숨쉬기
+    const b = Math.sin(p.walkPhase * 0.6 + performance.now() * 0.003);
+    sys = 1 + b * 0.02;
+  }
+
+  const flash = p.flash > 0 && Math.floor(p.flash / 2) % 2 === 0;
+  let img: CanvasImageSource = flash && spr.white ? spr.white : spr.img;
+  let alpha = 1;
+
+  // 사망: 뒤로 무너지는 회전 연출
+  if (p.dead) {
+    const dp = Math.min(1, p.deathT / 44);
+    const ease = 1 - (1 - dp) * (1 - dp);
+    lean = -f * ease * 1.45;
+    sxs = 1;
+    sys = 1 - ease * 0.15;
+    alpha = Math.max(0.55, 1 - Math.max(0, p.deathT - 20) * 0.004);
+    spr = set.base;
+    a = set.baseA;
+    size = 64;
+    img = flash && spr.white ? spr.white : spr.img;
+  }
+
+  ctx.save();
+  ctx.translate(sx, gy);
+  if (alpha < 1) ctx.globalAlpha = alpha;
+  ctx.rotate(lean);
+  ctx.scale(f * S * sxs, S * sys);
+  if (st === "dash" && !p.dead) {
+    // 대시 잔상
+    ctx.globalAlpha = 0.22;
+    ctx.drawImage(spr.img, -a.cx - 10, -a.foot, size, size);
+    ctx.globalAlpha = alpha;
+  }
+  ctx.drawImage(img, -a.cx, -a.foot, size, size);
+  ctx.restore();
+
+  // 부활/피격 무적 점멸
+  void 0;
+}
+
 function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, camX: number) {
+  if (p.cls !== "knight") {
+    drawRangedHero(ctx, p, camX);
+    return;
+  }
   const sx = p.x - camX;
   const gy = groundY(p.z) - p.air;
   const sc = depthScale(p.z);
@@ -795,6 +910,35 @@ function drawOutlined(
   ctx.drawImage(img, x, y, w, h);
 }
 
+function drawPlayerBolts(ctx: CanvasRenderingContext2D, w: World, camX: number) {
+  for (const b of w.pbolts) {
+    const bx = b.x - camX;
+    const by = groundY(b.z) - b.h;
+    if (b.orb) {
+      // 마법 구체: 글로우 + 코어
+      const g = ctx.createRadialGradient(bx, by, 1, bx, by, 13);
+      g.addColorStop(0, "#ffffff");
+      g.addColorStop(0.4, b.color);
+      g.addColorStop(1, "rgba(120,200,255,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(bx, by, 13, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // 화살: 꼬리선 + 촉
+      const dir = Math.sign(b.vx) || 1;
+      ctx.strokeStyle = b.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(bx - dir * 16, by - b.vz * 1.2);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(bx - 1 + dir * 2, by - 1.5, 3, 3);
+    }
+  }
+}
+
 function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy, camX: number) {
   const spr = enemySpr[e.kind];
   const sx = e.x - camX;
@@ -1115,6 +1259,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, w: World) {
   ents.sort((a, b) => b.z - a.z);
   for (const f of ents) shadow(ctx, f, camX);
   drawBolts(ctx, w, camX);
+  drawPlayerBolts(ctx, w, camX);
   drawDrops(ctx, w, camX);
   for (const f of ents) {
     if (f instanceof Player) drawPlayer(ctx, f, camX);

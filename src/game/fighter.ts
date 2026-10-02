@@ -37,6 +37,13 @@ export interface Arena {
   addScore(n: number): void;
   addCombo(): void;
   spawnBolt(x: number, z: number, vx: number, dmg: number): void;
+  spawnPlayerBolt(
+    x: number,
+    z: number,
+    vx: number,
+    dmg: number,
+    opts?: { vz?: number; pierce?: number; explode?: { r: number; dmg: number }; color?: string; orb?: boolean; h?: number }
+  ): void;
   timeMs: number;
 }
 
