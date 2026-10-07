@@ -35,7 +35,7 @@ const CLASS_SKILLS: Record<string, { key: string; name: string; cost: number }[]
   ],
   mage: [
     { key: "U", name: "화염구", cost: 22 },
-    { key: "I", name: "점멸", cost: 30 },
+    { key: "I", name: "화염벽", cost: 30 },
     { key: "O", name: "비전폭풍", cost: 42 },
   ],
 };

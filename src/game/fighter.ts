@@ -42,7 +42,23 @@ export interface Arena {
     z: number,
     vx: number,
     dmg: number,
-    opts?: { vz?: number; pierce?: number; explode?: { r: number; dmg: number }; color?: string; orb?: boolean; h?: number }
+    opts?: {
+      vz?: number;
+      pierce?: number;
+      explode?: { r: number; dmg: number; kbx?: number };
+      color?: string;
+      orb?: boolean;
+      h?: number;
+      rain?: boolean;
+      sprite?: string;
+    }
+  ): void;
+  spawnZone(x: number, z: number, kind: "rain" | "fire"): void;
+  spawnFx(
+    sprite: string,
+    x: number,
+    z: number,
+    opts?: { h?: number; scale?: number; life?: number; rot?: number; flip?: number; mode?: "burst" | "slash" | "static" }
   ): void;
   timeMs: number;
 }

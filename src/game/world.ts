@@ -16,6 +16,30 @@ export interface Drop {
   dead: boolean;
 }
 
+// 지속 피해 장판: rain=화살비(1초), fire=화염벽(약 2초)
+export interface Zone {
+  x: number;
+  z: number;
+  life: number;
+  maxLife: number;
+  kind: "rain" | "fire";
+  dead: boolean;
+}
+
+// 스킬 이펙트 스프라이트 (일시 표시)
+export interface Fx {
+  sprite: string;
+  x: number;
+  z: number;
+  h: number;
+  life: number;
+  maxLife: number;
+  scale: number;
+  rot: number;
+  flip: number;
+  mode: "burst" | "slash" | "static";
+}
+
 // 플레이어 투사체 (화살/매직볼트)
 export interface PBolt {
   x: number;
@@ -27,9 +51,11 @@ export interface PBolt {
   life: number;
   dead: boolean;
   pierce: number;
-  explode?: { r: number; dmg: number };
+  explode?: { r: number; dmg: number; kbx?: number };
   color: string;
+  rain: boolean; // 명중 지점에 화살비 장판 생성
   orb: boolean;
+  sprite?: string; // 투사체 렌더용 스프라이트 (화염구/관통탄)
   hitIds: Set<number>;
 }
 
@@ -65,6 +91,8 @@ export class World implements Arena {
   enemies: Fighter[] = [];
   bolts: Bolt[] = [];
   pbolts: PBolt[] = [];
+  zones: Zone[] = [];
+  fx: Fx[] = [];
   drops: Drop[] = []; // 체력 포션
   particles = new Particles();
   cam = new Camera();
@@ -122,7 +150,7 @@ export class World implements Arena {
     z: number,
     vx: number,
     dmg: number,
-    opts: { vz?: number; pierce?: number; explode?: { r: number; dmg: number }; color?: string; orb?: boolean; h?: number } = {}
+    opts: { vz?: number; pierce?: number; explode?: { r: number; dmg: number; kbx?: number }; color?: string; orb?: boolean; h?: number; rain?: boolean; sprite?: string } = {}
   ) {
     this.pbolts.push({
       x,
@@ -137,8 +165,36 @@ export class World implements Arena {
       explode: opts.explode,
       color: opts.color ?? "#cfffe0",
       orb: opts.orb ?? false,
+      rain: opts.rain ?? false,
+      sprite: opts.sprite,
       hitIds: new Set(),
     });
+  }
+
+  spawnFx(
+    sprite: string,
+    x: number,
+    z: number,
+    opts: { h?: number; scale?: number; life?: number; rot?: number; flip?: number; mode?: "burst" | "slash" | "static" } = {}
+  ) {
+    const life = opts.life ?? 20;
+    this.fx.push({
+      sprite,
+      x,
+      z,
+      h: opts.h ?? 30,
+      life,
+      maxLife: life,
+      scale: opts.scale ?? 1,
+      rot: opts.rot ?? 0,
+      flip: opts.flip ?? 1,
+      mode: opts.mode ?? "burst",
+    });
+  }
+
+  private updateFx() {
+    for (const f of this.fx) f.life--;
+    this.fx = this.fx.filter((f) => f.life > 0);
   }
 
   /** 디버그/테스트: 해당 웨이브(1부터 셈)로 즉시 점프 — 판 정리 후 새로 소환, 체력·MP 회복 */
@@ -147,6 +203,8 @@ export class World implements Arena {
     this.enemies = [];
     this.bolts = [];
     this.pbolts = [];
+    this.zones = [];
+    this.fx = [];
     this.drops = [];
     this.betweenT = 0;
     this.player.hp = this.player.maxHp;
@@ -323,6 +381,8 @@ export class World implements Arena {
     // 투사체
     this.updateBolts();
     this.updatePlayerBolts();
+    this.updateZones();
+    this.updateFx();
     // 포션
     this.updateDrops();
 
@@ -390,12 +450,21 @@ export class World implements Arena {
       b.x += b.vx;
       b.z += b.vz;
       b.life--;
-      if (b.life <= 0 || b.x < -40 || b.x > STAGE_LEN + 40 || b.z < 0 || b.z > 180) b.dead = true;
+      if (b.life <= 0 || b.x < -40 || b.x > STAGE_LEN + 40 || b.z < 0 || b.z > 180) {
+        b.dead = true;
+        if (b.rain) this.spawnZone(b.x, b.z, "rain"); // 빗나가도 그 자리에 쏟아진다
+      }
       if (b.dead) continue;
       for (const e of this.enemies) {
         if (e.dead || !(e instanceof Enemy) || b.hitIds.has(e.id)) continue;
         if (!beltHit(b.x, b.z, e.x, e.z, 16 + e.radius, 26) || e.air > 90) continue;
         b.hitIds.add(e.id);
+        // 화살비 신호탄: 처음 맞는 적 머리 위로 장판 소환
+        if (b.rain) {
+          this.spawnZone(e.x, e.z, "rain");
+          b.dead = true;
+          break;
+        }
         // 수호병 정면 가드: 화살·볼트도 방패에 막힌다
         if (e.blocksFrontal(b.x - b.vx * 4)) {
           const ggy = groundY(e.z) - e.air - 30;
@@ -452,6 +521,7 @@ export class World implements Arena {
     b.dead = true;
     const ex = b.explode!;
     const gy = groundY(b.z) - b.h;
+    this.spawnFx("fx_explosion", b.x, b.z, { h: b.h, scale: ex.r / 70, life: 22 });
     this.particles.ring(b.x, gy, "rgba(255,170,90,0.95)", 20, 12, ex.r * 0.35);
     this.particles.ring(b.x, gy, "rgba(255,230,160,0.7)", 10, 14, ex.r * 0.28);
     this.particles.spark(b.x, gy, 22, "#ffb060", 10);
@@ -469,9 +539,9 @@ export class World implements Arena {
         rx: 0,
         rz: 0,
         dmg: crit ? Math.round(ex.dmg * 1.5) : ex.dmg,
-        kbx: 7,
+        kbx: ex.kbx ?? 7,
         kbz: 1,
-        launch: 4,
+        launch: ex.kbx && ex.kbx > 10 ? 7 : 4,
         hitstun: 18,
         hitstop: 4,
         shake: 6,
@@ -485,6 +555,70 @@ export class World implements Arena {
         if (wasAlive && e.dead) this.onEnemyDeath(e);
       }
     }
+  }
+
+  /** 지속 피해 장판 생성 (rain=화살비, fire=화염벽) */
+  spawnZone(x: number, z: number, kind: "rain" | "fire") {
+    const life = kind === "rain" ? 60 : 115;
+    this.zones.push({
+      x: clamp(x, 40, STAGE_LEN - 40),
+      z: clamp(z, 10, 160),
+      life,
+      maxLife: life,
+      kind,
+      dead: false,
+    });
+    if (kind === "rain") sfx.launch();
+    else sfx.nova();
+  }
+
+  private updateZones() {
+    for (const r of this.zones) {
+      r.life--;
+      if (r.life <= 0) {
+        r.dead = true;
+        continue;
+      }
+      const fire = r.kind === "fire";
+      const rx = fire ? 46 : 78;
+      const rz = fire ? 70 : 48;
+      // 6틱마다 장판 내 적에게 피해
+      if (r.life % 6 === 0) {
+        for (const e of this.enemies) {
+          if (e.dead || !(e instanceof Enemy)) continue;
+          if (!beltHit(r.x, r.z, e.x, e.z, rx, rz) || e.air > 80) continue;
+          const crit = e.parryStunned && e.hitstun > 0;
+          const base = fire ? 7 : 5;
+          const atk: ActiveAttack = {
+            x: r.x,
+            z: r.z,
+            rx: 0,
+            rz: 0,
+            dmg: crit ? Math.round(base * 1.5) : base,
+            kbx: 0.5,
+            kbz: 0,
+            launch: 0,
+            hitstun: 8,
+            hitstop: 0,
+            shake: 1,
+            hitId: `zone-${r.kind}-${r.life}-${e.id}`,
+          };
+          const wasAlive = !e.dead;
+          if (e.hurt(atk, e.x - e.facing, this)) {
+            this.onPlayerLand(atk, e, crit);
+            if (r.kind === "rain" && this.player.cls === "archer")
+              this.player.mp = Math.min(this.player.maxMp, this.player.mp + 2);
+            if (wasAlive && e.dead) this.onEnemyDeath(e);
+          }
+        }
+      }
+      // 장판 분위기 이펙트
+      if (r.life % 4 === 0) {
+        if (fire) this.particles.ember(r.x + rand(-34, 34), groundY(r.z + rand(-40, 40)) - 8, 1, "rgba(255,150,60,0.85)");
+        else this.particles.dust(r.x + rand(-60, 60), groundY(r.z + rand(-30, 30)), 1);
+      }
+    }
+    this.zones = this.zones.filter((r) => !r.dead);
   }
 
   private updateDrops() {
@@ -670,6 +804,29 @@ export class World implements Arena {
       sfx.nova();
       if (!this.player.dead && this.player.invuln <= 0 && this.player.air < 60 && beltHit(e.x, e.z, this.player.x, this.player.z, 80, 50)) {
         this.hitPlayer(Math.round(e.spec.dmg * e.dmgMul * 0.6), this.player.x >= e.x ? 1 : -1, 16, e.x);
+      }
+      // 주변 적에게도 폭발 피해 — 자폭충을 적진에서 터뜨리는 재미 (연쇄 폭발 가능)
+      for (const other of this.enemies) {
+        if (other === e || other.dead || !(other instanceof Enemy)) continue;
+        if (!beltHit(e.x, e.z, other.x, other.z, 80, 50)) continue;
+        const wasAlive = !other.dead;
+        const atk: ActiveAttack = {
+          x: e.x,
+          z: e.z,
+          rx: 0,
+          rz: 0,
+          dmg: Math.round(e.spec.dmg * e.dmgMul * 0.8),
+          kbx: 8,
+          kbz: 1,
+          launch: 4,
+          hitstun: 18,
+          hitstop: 2,
+          shake: 4,
+          hitId: `bombd-${e.id}-${other.id}`,
+        };
+        if (other.hurt(atk, e.x, this) && wasAlive && other.dead) {
+          this.onEnemyDeath(other);
+        }
       }
     }
     // 체력 포션 드랍 (보스 확정, 돌격병 30%, 그 외 18%)

@@ -54,6 +54,19 @@ const heroJump = [0, 1, 2, 3].map((i) => loadSpr(`/sprites/hero_jump_${i}.png`))
 // 사망 키포즈 (create-character-state, 96x96): 무릎 꿇고 고개 떨굼 → 쓰러져 누움
 const heroDeathKneel = loadSpr("/sprites/hero_death_kneel.png");
 const heroDeathLying = loadSpr("/sprites/hero_death_lying.png");
+// 화염벽 장판 프레임 (Pixellab pixflux, 96x96 투명배경 — 발 89행, 중심 47열)
+const firewallSpr = [0, 1, 2].map((i) => loadSpr(`/sprites/firewall_${i}.png`));
+// 스킬 이펙트 스프라이트 (96x96 투명배경, 중심 기준 그림)
+const fxSpr: Record<string, Spr> = {};
+for (const n of ["fx_riftslash", "fx_skyslash", "fx_riftnova", "fx_pierce", "fx_arrowrain", "fx_explosion", "fx_fireball", "fx_arcanestorm", "fx_arrow", "fx_magicbolt"]) {
+  fxSpr[n] = loadSpr(`/sprites/${n}.png`);
+}
+// 방향성 투사체 스프라이트: 원본 대각선(≈-45°)을 수평으로 펴는 회전 보정 + 화면 크기
+const PROJ_SPR: Record<string, { rot: number; size: number }> = {
+  fx_pierce: { rot: 0.78, size: 58 },
+  fx_arrow: { rot: 0.728, size: 42 },
+  fx_magicbolt: { rot: 0.828, size: 46 },
+};
 const HERO_JUMP_ANCHOR = [
   { cx: 43, foot: 70 },
   { cx: 39, foot: 52 },
@@ -914,6 +927,27 @@ function drawPlayerBolts(ctx: CanvasRenderingContext2D, w: World, camX: number) 
   for (const b of w.pbolts) {
     const bx = b.x - camX;
     const by = groundY(b.z) - b.h;
+    const spr = b.sprite ? fxSpr[b.sprite] : null;
+    if (spr && spr.ready) {
+      const dir = Math.sign(b.vx) || 1;
+      ctx.save();
+      ctx.translate(bx, by);
+      // 불덩이는 회전, 화살/관통탄은 진행 방향으로 눕혀서 그린다
+      if (b.sprite === "fx_fireball") {
+        // 불덩이는 회전하며 날아간다
+        ctx.rotate((w.timeMs * 0.02) % (Math.PI * 2));
+        const S = 48;
+        ctx.drawImage(spr.img, -S / 2, -S / 2, S, S);
+      } else {
+        // 화살/관통탄/매직볼트: 원본 대각선을 진행 방향 수평으로 펴준다
+        const cfg = PROJ_SPR[b.sprite!] ?? { rot: 0, size: 48 };
+        ctx.scale(dir, 1);
+        ctx.rotate(cfg.rot);
+        ctx.drawImage(spr.img, -cfg.size / 2, -cfg.size / 2, cfg.size, cfg.size);
+      }
+      ctx.restore();
+      continue;
+    }
     if (b.orb) {
       // 마법 구체: 글로우 + 코어
       const g = ctx.createRadialGradient(bx, by, 1, bx, by, 13);
@@ -936,6 +970,100 @@ function drawPlayerBolts(ctx: CanvasRenderingContext2D, w: World, camX: number) 
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(bx - 1 + dir * 2, by - 1.5, 3, 3);
     }
+  }
+}
+
+function drawZones(ctx: CanvasRenderingContext2D, w: World, camX: number) {
+  for (const r of w.zones) {
+    const rx = r.x - camX;
+    const gy = groundY(r.z);
+    const fade = Math.min(1, r.life / 20); // 끝날 때 서서히 소멸
+    if (r.kind === "rain") {
+      // 화살비: 바닥 장판 + fx_arrowrain 스프라이트가 위에서 쏟아짐
+      ctx.save();
+      ctx.globalAlpha = 0.3 * fade;
+      ctx.fillStyle = "#8ef0c0";
+      ctx.beginPath();
+      ctx.ellipse(rx, gy, 78, 20, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      // 개별 화살이 하늘에서 장판으로 쏟아진다 (fx_arrow를 아래로 회전)
+      const ar = fxSpr.fx_arrow;
+      if (ar && ar.ready) {
+        const t = r.maxLife - r.life;
+        const S = 34;
+        for (let i = 0; i < 9; i++) {
+          // 결정적 분포: 좌우로 퍼지고, 각자 다른 낙하 주기
+          const ox = ((i * 61 + 13) % 150) - 75;
+          const speed = 10 + (i % 3) * 2;
+          const cycle = 70;
+          const ph = (t * speed + i * 37) % cycle;
+          const fallTop = gy - 128;
+          const ay = fallTop + (ph / cycle) * 128; // 위→아래
+          if (ay > gy - 6) continue;
+          const near = ay > gy - 40 ? (gy - ay) / 40 : 1; // 바닥 근처에서 페이드
+          ctx.save();
+          ctx.globalAlpha = fade * near;
+          ctx.translate(rx + ox, ay);
+          ctx.rotate(2.3); // 원본(우상향)을 아래로 향하게
+          ctx.drawImage(ar.img, -S / 2, -S / 2, S, S);
+          ctx.restore();
+        }
+      }
+    } else {
+      // 화염벽: Pixellab 불꽃 스프라이트 3프레임 순환 + 바닥 글로우
+      const t = r.maxLife - r.life;
+      ctx.save();
+      ctx.globalAlpha = 0.3 * fade;
+      const bg = ctx.createRadialGradient(rx, gy, 4, rx, gy, 54);
+      bg.addColorStop(0, "rgba(255,150,60,0.9)");
+      bg.addColorStop(1, "rgba(255,150,60,0)");
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      ctx.ellipse(rx, gy, 54, 18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      const spr = firewallSpr[Math.floor(t / 5) % firewallSpr.length];
+      if (spr.ready) {
+        ctx.save();
+        ctx.globalAlpha = fade;
+        // 96캔버스(발 89·중심 47)를 장판 폭(≈92px)에 맞춰 그린다
+        const W = 108;
+        const scale = W / 96;
+        ctx.drawImage(spr.img, rx - 47 * scale, gy - 89 * scale, W, 96 * scale);
+        ctx.restore();
+      }
+    }
+  }
+}
+
+function drawFx(ctx: CanvasRenderingContext2D, w: World, camX: number) {
+  for (const f of w.fx) {
+    const spr = fxSpr[f.sprite];
+    if (!spr || !spr.ready) continue;
+    const fx = f.x - camX;
+    const fy = groundY(f.z) - f.h;
+    const prog = 1 - f.life / f.maxLife; // 0→1
+    let alpha = 1;
+    let scale = f.scale;
+    if (f.mode === "burst") {
+      // 작게 시작해 커지며 사라짐
+      scale = f.scale * (0.55 + prog * 0.7);
+      alpha = f.life > f.maxLife * 0.4 ? 1 : f.life / (f.maxLife * 0.4);
+    } else if (f.mode === "slash") {
+      // 빠르게 나타났다 사라지는 참격
+      scale = f.scale * (0.9 + prog * 0.35);
+      alpha = Math.sin(Math.min(1, prog * 1.1) * Math.PI);
+    } else {
+      alpha = f.life > f.maxLife * 0.5 ? 1 : f.life / (f.maxLife * 0.5);
+    }
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+    ctx.translate(fx, fy);
+    ctx.rotate(f.rot);
+    ctx.scale(f.flip * scale, scale);
+    ctx.drawImage(spr.img, -48, -48, 96, 96);
+    ctx.restore();
   }
 }
 
@@ -1260,12 +1388,14 @@ export function drawScene(ctx: CanvasRenderingContext2D, w: World) {
   for (const f of ents) shadow(ctx, f, camX);
   drawBolts(ctx, w, camX);
   drawPlayerBolts(ctx, w, camX);
+  drawZones(ctx, w, camX);
   drawDrops(ctx, w, camX);
   for (const f of ents) {
     if (f instanceof Player) drawPlayer(ctx, f, camX);
     else if (f instanceof Enemy) drawEnemy(ctx, f, camX);
   }
 
+  drawFx(ctx, w, camX);
   w.particles.draw(ctx, camX);
   ctx.restore();
 

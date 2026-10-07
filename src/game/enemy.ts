@@ -49,6 +49,8 @@ export class Enemy extends Fighter {
   telegraph = 0; // 예고(0~1) — 렌더 플래시
   parryStunned = false; // 패링 스턴 중 — 이 상태에서 맞으면 크리티컬
   healFx = 0; // 치유 받은 직후 — 초록 기운이 몸에서 피어오르는 표시
+  private escapeT = 0; // 주술사: 벽에 몰렸을 때 반대편 돌파 타이머
+  private escapeDir = 1;
   dmgMul = 1; // 웨이브/주기 스케일링 — 데미지 배수
   powerMul = 1; // 점수 보정용 (체력 배수와 동일)
   elite = false; // 기습병(노란 테두리): 엇박자 예비동작 + 잦은 공격
@@ -243,6 +245,34 @@ export class Enemy extends Fighter {
               hitId: `e${this.id}-${swc++}`,
               sfx: "nova",
             };
+            // 폭발은 적도 가리지 않는다 — 주변 아군 오사 (연쇄 폭발 가능)
+            for (const ally of arena.enemies) {
+              if (ally === this || ally.dead) continue;
+              if (Math.abs(ally.x - this.x) > 80 || Math.abs(ally.z - this.z) > 54) continue;
+              const was = !ally.dead;
+              const hitOk = ally.hurt(
+                {
+                  x: this.x,
+                  z: this.z,
+                  rx: 0,
+                  rz: 0,
+                  dmg: Math.round(this.spec.dmg * this.dmgMul * 0.8),
+                  kbx: 8,
+                  kbz: 1,
+                  launch: 4,
+                  hitstun: 18,
+                  hitstop: 2,
+                  shake: 4,
+                  hitId: `bombf-${this.id}-${ally.id}`,
+                },
+                this.x,
+                arena
+              );
+              if (hitOk && was && ally.dead && ally instanceof Enemy) {
+                ally.playDeathFx(arena);
+                arena.addScore(Math.round(ally.spec.score * ally.powerMul));
+              }
+            }
             const bgy = groundY(this.z) - this.air;
             arena.particles.ring(this.x, bgy - 16, "rgba(255,150,60,0.95)", 20, 10, 26);
             arena.particles.ring(this.x, bgy - 16, "rgba(255,220,120,0.8)", 10, 14, 20);
@@ -276,11 +306,33 @@ export class Enemy extends Fighter {
               arena.particles.spark(this.x, hgy - 26, 14, "#a8ffd4", 7);
               arena.particles.glow(this.x, hgy - 26, "rgba(150,255,200,0.55)", 52, 14);
               sfx.skill();
+              this.state = "recover";
+              this.t = 0;
             } else {
-              arena.particles.glow(this.x, hgy - 26, "rgba(150,255,200,0.3)", 24, 6);
+              // 힐 대상이 없으면(혼자 남음 등) 플레이어를 직접 공격한다 — 교착·무피해 방지
+              const pdist = Math.abs(arena.player.x - this.x);
+              this.facePlayer(arena.player);
+              if (pdist <= this.spec.reach * 1.1) {
+                // 근접: 지팡이 타격
+                this.state = "attack";
+                this.t = 0;
+                this.meleeHit();
+                arena.particles.spark(this.x + this.facing * 24, hgy - 26, 8, "#a8ffd4", 6);
+                sfx.hit();
+              } else {
+                // 원거리: 저주 볼트
+                arena.spawnBolt(
+                  this.x + this.facing * 18,
+                  this.z,
+                  this.facing * 6.2,
+                  Math.round(this.spec.dmg * this.dmgMul)
+                );
+                arena.particles.glow(this.x + this.facing * 20, hgy - 26, "rgba(150,255,200,0.5)", 24, 7);
+                sfx.skill();
+                this.state = "recover";
+                this.t = 0;
+              }
             }
-            this.state = "recover";
-            this.t = 0;
           } else if (this.kind === "caster") {
             arena.spawnBolt(
               this.x + this.facing * 18,
@@ -419,14 +471,60 @@ export class Enemy extends Fighter {
             this.startAttack();
           }
         } else if (this.kind === "shaman") {
-          // 플레이어와 거리 유지, 다친 아군이 있으면 치유 의식
-          if (dist < 240) this.vx = -sign(dx) * spd;
-          else this.vx *= 0.8;
-          this.vz = sign(dz) * spd * 0.5;
-          const hurtAlly = arena.enemies.some(
-            (al) => al !== this && !al.dead && al.hp < al.maxHp && Math.abs(al.x - this.x) < 220
-          );
-          if (hurtAlly && this.atkCd <= 0) this.startAttack();
+          // 주술사: 아군 무리 뒤에 숨어 치유. 혼자 남으면 직접 싸우고, 코너에 몰리면 돌파한다.
+          const allies = arena.enemies.filter(
+            (al) => al !== this && !al.dead && al instanceof Enemy && !al.kind.startsWith("boss")
+          ) as Enemy[];
+          const SAFE = 150; // 플레이어와 유지할 최소 거리
+
+          if (this.escapeT > 0) {
+            // 코너 돌파 중 — 플레이어를 지나쳐 반대편으로
+            this.escapeT--;
+            this.vx = this.escapeDir * spd * 2.4;
+            this.vz = clamp(dz, -spd, spd) * 0.6;
+            if (this.escapeT % 4 === 0)
+              arena.particles.ember(this.x, groundY(this.z) - 24, 1, "rgba(170,255,210,0.7)");
+          } else if (allies.length === 0) {
+            // 혼자 남음 — 교착 방지로 플레이어에게 접근해 직접 공격
+            const rng = this.spec.reach * 0.82;
+            if (dist <= rng && Math.abs(dz) < 40 && this.atkCd <= 0) {
+              this.facePlayer(p);
+              this.startAttack();
+            } else {
+              this.vx = sign(dx) * spd;
+              this.vz = clamp(dz, -spd, spd);
+            }
+          } else {
+            // 아군 무리의 중심을 구해 그 근처(플레이어 반대편)에 자리잡는다
+            let cx = 0;
+            for (const al of allies) cx += al.x;
+            cx /= allies.length;
+            const anchorX = cx + sign(cx - p.x || 1) * 70; // 무리에서 플레이어 반대쪽 70px
+            if (dist < SAFE) {
+              // 플레이어가 너무 가까움 — 반대로 도망, 벽이면 돌파
+              const fleeDir = -sign(dx || 1);
+              const nextX = this.x + fleeDir * 60;
+              if (nextX < 70 || nextX > STAGE_LEN - 70) {
+                this.escapeT = 42;
+                this.escapeDir = sign(dx) || 1;
+                sfx.dash();
+              } else {
+                this.vx = fleeDir * spd;
+              }
+              this.vz = sign(dz) * spd * 0.5;
+            } else {
+              // 무리 정착 지점으로 이동 (플레이어와는 SAFE 이상 유지)
+              const wantDir = sign(anchorX - this.x);
+              const wouldApproach = Math.abs(this.x + wantDir * spd - p.x) < SAFE;
+              this.vx = Math.abs(anchorX - this.x) > 24 && !wouldApproach ? wantDir * spd : this.vx * 0.8;
+              // 무리의 세로 위치에 맞춰 선다
+              const az = allies.reduce((s, a) => s + a.z, 0) / allies.length;
+              this.vz = Math.abs(az - this.z) > 16 ? sign(az - this.z) * spd * 0.5 : this.vz * 0.8;
+            }
+          }
+
+          const hurtAlly = allies.some((al) => al.hp < al.maxHp && Math.abs(al.x - this.x) < 220);
+          if (hurtAlly && this.atkCd <= 0 && this.escapeT <= 0) this.startAttack();
         } else if (this.kind === "boss2") {
           // 공허 사신: 사거리 밖이면 플레이어 등 뒤로 점멸해 낫질
           const rng2 = this.spec.reach * 0.82;

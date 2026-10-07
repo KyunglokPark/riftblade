@@ -6,7 +6,7 @@ export type PlayerClass = "knight" | "archer" | "mage";
 const CLASS_STATS: Record<PlayerClass, { hp: number; mp: number; speed: number; mpRegen: number }> = {
   knight: { hp: 130, mp: 100, speed: 3.5, mpRegen: 0.015 },
   archer: { hp: 95, mp: 100, speed: 4.0, mpRegen: 0.03 },
-  mage: { hp: 80, mp: 130, speed: 3.4, mpRegen: 0.09 },
+  mage: { hp: 80, mp: 130, speed: 3.4, mpRegen: 0.16 },
 };
 
 import { Fighter, Arena, ActiveAttack } from "./fighter";
@@ -315,6 +315,7 @@ export class Player extends Fighter {
         arena.spawnPlayerBolt(this.x + this.facing * 22, this.z, this.facing * 13, 10, {
           color: "#cfffe0",
           h,
+          sprite: "fx_arrow",
         });
         sfx.arrow();
       } else {
@@ -322,6 +323,7 @@ export class Player extends Fighter {
           color: "#9fd8ff",
           orb: true,
           h,
+          sprite: "fx_magicbolt",
         });
         sfx.magic();
         arena.particles.glow(this.x + this.facing * 28, groundY(this.z) - h, "rgba(130,210,255,0.5)", 24, 7);
@@ -399,8 +401,24 @@ export class Player extends Fighter {
     }
   }
 
-  // ---- 대시(무적) ----
+  // ---- 대시(무적) / 법사는 점멸(순간이동) ----
   private startDash(arena: Arena) {
+    if (this.cls === "mage") {
+      // 점멸: 전방 순간이동 + 무적
+      const g0 = groundY(this.z) - 26;
+      arena.particles.glow(this.x, g0, "rgba(150,220,255,0.6)", 36, 10);
+      arena.particles.ember(this.x, g0, 10, "rgba(150,220,255,0.9)");
+      this.x += this.facing * 180;
+      this.invuln = 20;
+      this.state = "dash";
+      this.t = 0;
+      this.vx = 0;
+      const g1 = groundY(this.z) - 26;
+      arena.particles.ring(this.x, g1, "rgba(150,220,255,0.8)", 12, 8, 22);
+      arena.particles.ember(this.x, g1, 12, "rgba(150,220,255,0.9)");
+      sfx.dash();
+      return;
+    }
     this.state = "dash";
     this.t = 0;
     this.invuln = 16;
@@ -411,6 +429,16 @@ export class Player extends Fighter {
     arena.particles.glow(this.x, groundY(this.z) - 24, "rgba(120,220,255,0.35)", 30, 8);
   }
   private updateDash(arena: Arena) {
+    if (this.cls === "mage") {
+      // 점멸 후 잔상 포즈 — 곧바로 행동 가능
+      this.vx *= 0.6;
+      if (this.t >= 6) {
+        if (this.takeAtk()) return this.startShoot();
+        if (this.takeDash()) return this.startDash(arena);
+      }
+      if (this.t >= 9) this.state = "idle";
+      return;
+    }
     if (this.t < 13) {
       this.vx = this.facing * 17 * (1 - this.t / 26); // 더 멀리, 서서히 감속
     } else {
@@ -464,6 +492,7 @@ export class Player extends Fighter {
           color: "#ffd76a",
           pierce: 99,
           h: this.air + 30,
+          sprite: "fx_pierce",
         });
         sfx.heavy();
         arena.particles.glow(this.x + this.facing * 30, groundY(this.z) - this.air - 30, "rgba(255,215,106,0.6)", 30, 8);
@@ -480,6 +509,7 @@ export class Player extends Fighter {
           orb: true,
           explode: { r: 95, dmg: 24 },
           h: this.air + 30,
+          sprite: "fx_fireball",
         });
         sfx.nova();
         arena.particles.glow(this.x + this.facing * 30, groundY(this.z) - this.air - 30, "rgba(255,176,96,0.6)", 34, 10);
@@ -489,6 +519,14 @@ export class Player extends Fighter {
     }
     if (this.t < 22) this.vx = this.facing * (9.5 - this.t * 0.28);
     else this.vx *= 0.7;
+    if (this.t === 2 || this.t === 12)
+      arena.spawnFx("fx_riftslash", this.x + this.facing * 30, this.z, {
+        h: this.air + 34,
+        scale: 1.1,
+        life: 16,
+        flip: this.facing,
+        mode: "slash",
+      });
     // 4프레임마다 새 타격
     if (this.t < 22 && this.t % 4 === 0) {
       this.swingId = `p${this.id}-s1-${this.swingCtr++}`;
@@ -517,28 +555,13 @@ export class Player extends Fighter {
     if (this.t >= 30) this.state = "idle";
   }
 
-  // ---- 스킬2: 기사 천공참 / 궁사 화살비(부채꼴 5연사) / 법사 점멸 ----
-  private startSkill2(arena: Arena) {
+  // ---- 스킬2: 기사 천공참 / 궁사 화살비 / 법사 화염벽 ----
+  private startSkill2(_arena: Arena) {
     this.mp -= 30;
     this.cd2 = 120;
-    if (this.cls === "mage") {
-      // 점멸: 전방 순간이동 + 무적
-      const g0 = groundY(this.z) - 26;
-      arena.particles.glow(this.x, g0, "rgba(150,220,255,0.6)", 36, 10);
-      arena.particles.ember(this.x, g0, 10, "rgba(150,220,255,0.9)");
-      this.x += this.facing * 190;
-      this.invuln = 24;
-      this.state = "skill2";
-      this.t = 0;
-      const g1 = groundY(this.z) - 26;
-      arena.particles.ring(this.x, g1, "rgba(150,220,255,0.8)", 12, 8, 22);
-      arena.particles.ember(this.x, g1, 12, "rgba(150,220,255,0.9)");
-      sfx.dash();
-      return;
-    }
     this.state = "skill2";
     this.t = 0;
-    if (this.cls === "archer") {
+    if (this.cls === "archer" || this.cls === "mage") {
       this.vx *= 0.5;
       sfx.skill();
       return;
@@ -552,24 +575,27 @@ export class Player extends Fighter {
   }
   private updateSkill2(arena: Arena) {
     if (this.cls === "mage") {
-      // 점멸 후 잔상 포즈
-      this.vx *= 0.7;
-      if (this.t >= 10) this.state = "idle";
+      // 화염벽: 전방에 불의 장벽을 세워 지속 피해
+      this.vx *= 0.8;
+      if (this.t === 14) {
+        arena.spawnZone(this.x + this.facing * 140, this.z, "fire");
+        arena.particles.glow(this.x + this.facing * 40, groundY(this.z) - this.air - 30, "rgba(255,150,60,0.6)", 34, 10);
+      }
+      if (this.t >= 28) this.state = "idle";
       return;
     }
     if (this.cls === "archer") {
-      // 화살비: 부채꼴 5연발
+      // 화살비: 신호탄을 쏘고, 처음 맞는 적 머리 위로 1초간 화살이 쏟아진다
       this.vx *= 0.8;
       if (this.t === 12) {
-        for (const vz of [-2.4, -1.2, 0, 1.2, 2.4]) {
-          arena.spawnPlayerBolt(this.x + this.facing * 22, this.z, this.facing * 11, 8, {
-            vz,
-            color: "#cfffe0",
-            h: this.air + 30,
-          });
-        }
+        arena.spawnPlayerBolt(this.x + this.facing * 22, this.z, this.facing * 12, 10, {
+          color: "#8ef0c0",
+          h: this.air + 30,
+          rain: true,
+          sprite: "fx_pierce",
+        });
         sfx.heavy();
-        arena.particles.spark(this.x + this.facing * 26, groundY(this.z) - this.air - 32, 8, "#cfffe0", 6);
+        arena.particles.spark(this.x + this.facing * 26, groundY(this.z) - this.air - 32, 8, "#8ef0c0", 6);
       }
       if (this.t >= 26) this.state = "idle";
       return;
@@ -601,6 +627,7 @@ export class Player extends Fighter {
         arena.particles.spark(this.x, gy - 20, 26, WHITE, 10);
         arena.particles.dust(this.x, gy, 18);
         sfx.nova();
+        arena.spawnFx("fx_skyslash", this.x, this.z, { h: 10, scale: 1.4, life: 22 });
         this.slammed = true;
         this.t = 0;
       }
@@ -630,8 +657,9 @@ export class Player extends Fighter {
       if (this.t === 14) {
         arena.spawnPlayerBolt(this.x + this.facing * 24, this.z, this.facing * 12, 16, {
           color: "#ff9a5c",
-          explode: { r: 115, dmg: 34 },
+          explode: { r: 115, dmg: 34, kbx: 15 }, // 강넉백 — 적진을 날려버린다
           h: this.air + 30,
+          sprite: "fx_pierce",
         });
         sfx.nova();
       }
@@ -640,7 +668,12 @@ export class Player extends Fighter {
     }
     const gy = groundY(this.z);
     if (this.t === 16) {
-      // 폭발
+      // 폭발 — 기사 파열노바(청록) / 법사 비전폭풍(보라)
+      arena.spawnFx(this.cls === "mage" ? "fx_arcanestorm" : "fx_riftnova", this.x, this.z, {
+        h: this.air + 30,
+        scale: 2.2,
+        life: 26,
+      });
       this.swingId = `p${this.id}-s3-${this.swingCtr++}`;
       this.active = {
         x: this.x,

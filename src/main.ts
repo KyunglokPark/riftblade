@@ -44,7 +44,7 @@ const CLASS_CARDS: ClassCard[] = [
     name: "파열검사",
     title: "근접 콤보 · 패링의 달인",
     lines: ["HP 130 · 검격 콤보와 어퍼·공중기", "패링으로 적을 스턴시키고 MP 수급", "U 파열참 · I 천공참 · O 파열노바"],
-    img: cardImg("/sprites/hero.png"),
+    img: cardImg("/sprites/hero_front.png"),
     imgSize: 64,
   },
   {
@@ -52,15 +52,15 @@ const CLASS_CARDS: ClassCard[] = [
     name: "바람 사수",
     title: "민첩한 원거리 연사",
     lines: ["HP 95 · 가장 빠른 발놀림", "화살 명중마다 MP +4", "U 관통사격 · I 화살비 · O 폭발화살"],
-    img: cardImg("/sprites/archer.png"),
+    img: cardImg("/sprites/archer_front.png"),
     imgSize: 64,
   },
   {
     cls: "mage",
     name: "균열 술사",
-    title: "강력한 마법 · 점멸 회피",
-    lines: ["HP 80 · MP 130, 자연회복 최속", "묵직한 매직볼트와 광역 마법", "U 화염구 · I 점멸 · O 비전폭풍"],
-    img: cardImg("/sprites/mage.png"),
+    title: "강력한 마법 · 점멸(L) 회피",
+    lines: ["HP 80 · MP 130, 자연회복 압도적", "대시 대신 점멸로 적을 통과", "U 화염구 · I 화염벽 · O 비전폭풍"],
+    img: cardImg("/sprites/mage_front.png"),
     imgSize: 64,
   },
 ];
