@@ -2,7 +2,7 @@
 
 import "./style.css";
 import { initInput, pressed, endInputFrame } from "./core/input";
-import { initAudio, sfx, toggleMute } from "./core/audio";
+import { initAudio, sfx, toggleMute, toggleMusic } from "./core/audio";
 import { playMusic, stopMusic, playJingle } from "./core/music";
 import { World } from "./game/world";
 import type { PlayerClass } from "./game/player";
@@ -16,13 +16,17 @@ const ctx = canvas.getContext("2d")!;
 initInput();
 initAudio();
 
-type State = "title" | "select" | "play" | "pause" | "win" | "lose";
+type State = "title" | "select" | "askTut" | "play" | "pause" | "confirm" | "win" | "lose";
 let state: State = "title";
 let world = new World();
 let titleT = 0;
 let loseT = 0; // 사망 연출 경과 틱
-let muteMsgT = 0; // 음소거 토글 표시
-let muted = false;
+let toastMsg = ""; // 상단 알림 (음소거/음악 토글 등)
+let toastT = 0;
+function toast(msg: string) {
+  toastMsg = msg;
+  toastT = 90;
+}
 
 // ---- 캐릭터 선택 ----
 interface ClassCard {
@@ -66,8 +70,12 @@ const CLASS_CARDS: ClassCard[] = [
 ];
 let selIdx = 0;
 
-function startGame(cls: PlayerClass) {
+let pendingCls: PlayerClass = "knight";
+let tutChoice = 0; // 0=예, 1=아니오
+
+function startGame(cls: PlayerClass, tutorial = false) {
   world = new World(cls);
+  if (tutorial) world.startTutorial();
   state = "play";
   sfx.ui();
 }
@@ -76,8 +84,11 @@ function startGame(cls: PlayerClass) {
 let waveJumpBuf: string | null = null;
 window.addEventListener("keydown", (e) => {
   if (e.code === "KeyM") {
-    muted = !toggleMute();
-    muteMsgT = 90;
+    toast(toggleMute() ? "🔊 소리 켜짐" : "🔇 전체 음소거");
+    return;
+  }
+  if (e.code === "KeyB") {
+    toast(toggleMusic() ? "🎵 음악 켜짐" : "🎵 음악 꺼짐 (효과음 유지)");
     return;
   }
   // 사망/선택 화면에서 Esc → 타이틀로
@@ -85,8 +96,30 @@ window.addEventListener("keydown", (e) => {
     state = "title";
     return;
   }
+  // 튜토리얼 질문에서 Esc → 캐릭터 선택으로
+  if (state === "askTut" && e.key === "Escape") {
+    state = "select";
+    return;
+  }
+  // 종료 확인 화면: Esc 한 번 더 → 타이틀
+  if (state === "confirm" && e.key === "Escape") {
+    state = "title";
+    sfx.ui();
+    return;
+  }
+  // 일시정지 중 Esc → 종료 확인
+  if (state === "pause" && e.key === "Escape") {
+    state = "confirm";
+    return;
+  }
   if (state !== "play") {
     waveJumpBuf = null;
+    return;
+  }
+  // 플레이 중 Esc (웨이브 점프 입력 중이 아닐 때) → 종료 확인
+  if (e.key === "Escape" && waveJumpBuf === null) {
+    state = "confirm";
+    sfx.ui();
     return;
   }
   if (waveJumpBuf === null) {
@@ -111,10 +144,10 @@ window.addEventListener("keydown", (e) => {
 
 function tick() {
   titleT++;
-  if (muteMsgT > 0) muteMsgT--;
+  if (toastT > 0) toastT--;
   // 상태별 BGM
   if (state === "title" || state === "select") playMusic("title");
-  else if (state === "play" || state === "pause") playMusic(world.musicTheme());
+  else if (state === "play" || state === "pause" || state === "confirm") playMusic(world.musicTheme());
   else if (state === "lose") stopMusic(); // YOU DIED는 정적 속에서
   if (state === "title") {
     if (pressed("start") || pressed("attack")) {
@@ -132,7 +165,22 @@ function tick() {
       selIdx = (selIdx + 1) % CLASS_CARDS.length;
       sfx.ui();
     }
-    if (pressed("start") || pressed("attack")) startGame(CLASS_CARDS[selIdx].cls);
+    if (pressed("start") || pressed("attack")) {
+      pendingCls = CLASS_CARDS[selIdx].cls;
+      tutChoice = 0;
+      state = "askTut";
+      sfx.ui();
+    }
+    return;
+  }
+  if (state === "askTut") {
+    if (pressed("left") || pressed("right")) {
+      tutChoice = 1 - tutChoice;
+      sfx.ui();
+    }
+    if (pressed("start") || pressed("attack")) {
+      startGame(pendingCls, tutChoice === 0);
+    }
     return;
   }
   if (state === "win" || state === "lose") {
@@ -152,6 +200,10 @@ function tick() {
     return;
   }
   if (state === "pause") {
+    if (pressed("pause") || pressed("start")) state = "play";
+    return;
+  }
+  if (state === "confirm") {
     if (pressed("pause") || pressed("start")) state = "play";
     return;
   }
@@ -184,14 +236,26 @@ function render() {
     drawMuteMsg();
     return;
   }
+  if (state === "askTut") {
+    drawAskTut();
+    drawMuteMsg();
+    return;
+  }
   drawScene(ctx, world);
   drawHud(ctx, world);
   drawControlsHint();
   if (state === "play" && waveJumpBuf !== null)
     overlay("웨이브 점프", `WAVE  ${waveJumpBuf || "_"}\n숫자 입력 후 Enter · Esc 취소`, "#ffd76a");
-  if (state === "pause") overlay("일시정지", "P / Enter 로 계속");
+  if (state === "pause") overlay("일시정지", "P / Enter 로 계속 · Esc 나가기");
+  if (state === "confirm") overlay("메인 화면으로 나갈까요?", "Esc — 나가기 · Enter — 계속하기", "#ffd76a");
   if (state === "win") overlay("균열 봉인 완료!", `점수 ${world.score} · 최대 콤보 ${world.maxCombo}\nEnter 로 타이틀`, "#8ef0c0");
   if (state === "lose") drawYouDie();
+  // 스테이지 전환 페이드 (HUD 포함 전체를 덮는다)
+  const fa = world.fadeAlpha;
+  if (fa > 0) {
+    ctx.fillStyle = `rgba(3,5,12,${fa})`;
+    ctx.fillRect(0, 0, VW, VH);
+  }
   drawMuteMsg();
 }
 
@@ -212,29 +276,12 @@ function drawTitle() {
   ctx.font = "800 30px 'Segoe UI', sans-serif";
   ctx.fillText("파 열 검", cx, 232);
 
-  ctx.fillStyle = "rgba(210,235,255,0.85)";
-  ctx.font = "500 15px 'Segoe UI', sans-serif";
-  ctx.fillText("차원의 균열에서 쏟아지는 그림자 군세를 베어라", cx, 268);
-
-  // 조작 안내
-  const lines = [
-    "이동 : ← → ↑ ↓  (WASD)      점프 : K / Space      대시(무적) : L / Shift",
-    "공격 : J   ·   ↓+J 어퍼(띄우기) → 점프+J 공중 콤보   ·   공중 ↓+J 내려찍기",
-    "스킬 : U 파열참   I 천공참   O 파열노바   (MP 소모 · 쿨다운)",
-  ];
-  ctx.fillStyle = "rgba(190,220,255,0.8)";
-  ctx.font = "500 14px 'Segoe UI', sans-serif";
-  lines.forEach((l, i) => ctx.fillText(l, cx, 330 + i * 26));
-
   // 시작
   if (Math.floor(titleT / 30) % 2 === 0) {
     ctx.fillStyle = "#ffd76a";
     ctx.font = "800 22px 'Segoe UI', sans-serif";
-    ctx.fillText("▶  Enter / J  로 시작", cx, 452);
+    ctx.fillText("▶  Enter / J  로 시작", cx, 400);
   }
-  ctx.fillStyle = "rgba(150,180,220,0.5)";
-  ctx.font = "500 12px 'Segoe UI', sans-serif";
-  ctx.fillText("Fable 5 · 원 프롬프트 액션 게임 테스트", cx, 500);
   ctx.restore();
 }
 
@@ -306,23 +353,70 @@ function drawSelect() {
   ctx.restore();
 }
 
+function drawAskTut() {
+  drawBackground(ctx, titleT * 0.4);
+  ctx.fillStyle = "rgba(4,6,14,0.65)";
+  ctx.fillRect(0, 0, VW, VH);
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#dff9ff";
+  ctx.shadowColor = "#5cf0ff";
+  ctx.shadowBlur = 10;
+  ctx.font = "900 34px 'Segoe UI', sans-serif";
+  ctx.fillText("튜토리얼을 진행할까요?", VW / 2, 190);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "rgba(190,220,255,0.8)";
+  ctx.font = "500 15px 'Segoe UI', sans-serif";
+  ctx.fillText("이동 · 점프 · 대시 · 공격 · 스킬을 하나씩 배웁니다", VW / 2, 224);
+
+  // 예 / 아니오 버튼
+  const opts = ["예 — 배우고 시작", "아니오 — 바로 시작"];
+  const bw = 250;
+  const bh = 64;
+  const gap = 40;
+  const x0 = VW / 2 - bw - gap / 2;
+  const y0 = 280;
+  opts.forEach((label, i) => {
+    const x = x0 + i * (bw + gap);
+    const sel = i === tutChoice;
+    ctx.fillStyle = sel ? "rgba(24,46,66,0.95)" : "rgba(12,18,32,0.85)";
+    ctx.fillRect(x, y0, bw, bh);
+    ctx.lineWidth = sel ? 3 : 1;
+    ctx.strokeStyle = sel ? "#5cf0ff" : "rgba(120,150,190,0.4)";
+    if (sel) {
+      ctx.shadowColor = "#5cf0ff";
+      ctx.shadowBlur = 14;
+    }
+    ctx.strokeRect(x, y0, bw, bh);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = sel ? "#5cf0ff" : "rgba(220,240,255,0.75)";
+    ctx.font = sel ? "800 19px 'Segoe UI', sans-serif" : "600 18px 'Segoe UI', sans-serif";
+    ctx.fillText(label, x + bw / 2, y0 + 40);
+  });
+
+  ctx.fillStyle = "rgba(160,190,230,0.6)";
+  ctx.font = "500 13px 'Segoe UI', sans-serif";
+  ctx.fillText("← → 선택 · Enter 확정 · Esc 뒤로", VW / 2, y0 + bh + 44);
+  ctx.restore();
+}
+
 function drawControlsHint() {
   ctx.save();
   ctx.textAlign = "right";
   ctx.fillStyle = "rgba(160,190,230,0.5)";
   ctx.font = "500 11px 'Segoe UI', sans-serif";
-  ctx.fillText("이동 WASD/화살표 · 공격 J · 점프 K · 대시 L · 스킬 U I O · 포션 H · 일시정지 P · 음소거 M", VW - 12, VH - 12);
+  ctx.fillText("이동 WASD/화살표 · 공격 J · 점프 K · 대시 L · 스킬 U I O · 포션 H · P 일시정지 · M 음소거 · B 음악 · Esc 나가기", VW - 12, VH - 12);
   ctx.restore();
 }
 
 function drawMuteMsg() {
-  if (muteMsgT <= 0) return;
+  if (toastT <= 0) return;
   ctx.save();
-  ctx.globalAlpha = Math.min(1, muteMsgT / 20);
+  ctx.globalAlpha = Math.min(1, toastT / 20);
   ctx.textAlign = "center";
-  ctx.fillStyle = muted ? "#ff8a8a" : "#8ef0c0";
+  ctx.fillStyle = "#8ef0c0";
   ctx.font = "800 16px 'Segoe UI', sans-serif";
-  ctx.fillText(muted ? "🔇 음소거" : "🔊 소리 켜짐", VW / 2, 86);
+  ctx.fillText(toastMsg, VW / 2, 86);
   ctx.restore();
 }
 

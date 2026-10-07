@@ -109,6 +109,91 @@ export class World implements Arena {
   bannerT = 0;
   private betweenT = 0;
 
+  // 튜토리얼: -1=꺼짐, 0 이동 → 1 점프 → 2 대시 → 3 공격(처치) → 4 스킬 → 5 완료 연출
+  tutorialStep = -1;
+  private tutMoved = 0;
+  private tutPrevX = 0;
+  private tutPrevZ = 0;
+  private tutT = 0;
+  private transTarget: "next" | "restart" = "next"; // 페이드아웃 후 행동
+
+  startTutorial() {
+    this.tutorialStep = 0;
+    this.enemies = [];
+    this.banner = "";
+    this.bannerT = 0;
+    this.tutPrevX = this.player.x;
+    this.tutPrevZ = this.player.z;
+  }
+
+  private tutAdvance() {
+    this.tutorialStep++;
+    this.tutT = 0;
+    sfx.checkpoint();
+    const gy = groundY(this.player.z) - 70;
+    this.particles.text(this.player.x, gy, "좋아!", "#8ef0c0", 1.3);
+    this.particles.spark(this.player.x, gy + 20, 10, "#8ef0c0", 6);
+  }
+
+  private spawnDummy(off: number) {
+    // 연습용 허수아비: 데미지 0 (dmgMul 0)
+    const e = new Enemy("grunt", clamp(this.player.x + off, 80, STAGE_LEN - 80), this.player.z, 1, 0, false);
+    this.enemies.push(e);
+  }
+
+  private updateTutorial() {
+    const p = this.player;
+    this.tutT++;
+    switch (this.tutorialStep) {
+      case 0: {
+        // 이동: 일정 거리 움직이면 통과
+        this.tutMoved += Math.abs(p.x - this.tutPrevX) + Math.abs(p.z - this.tutPrevZ);
+        this.tutPrevX = p.x;
+        this.tutPrevZ = p.z;
+        if (this.tutMoved > 220) this.tutAdvance();
+        break;
+      }
+      case 1:
+        if (p.airborne) this.tutAdvance();
+        break;
+      case 2:
+        if (p.state === "dash") {
+          this.tutAdvance();
+          this.spawnDummy(240);
+        }
+        break;
+      case 3:
+        if (this.enemies.length > 0 && this.aliveEnemies().length === 0) {
+          this.tutAdvance();
+          this.enemies = [];
+          this.spawnDummy(-240);
+        }
+        break;
+      case 4:
+        if (p.cd1 > 0 || p.cd2 > 0 || p.cd3 > 0) this.tutAdvance();
+        break;
+      case 5:
+        if (this.tutT >= 110 && !this.transition) {
+          // 완료 — 페이드 후 본게임 1웨이브부터
+          this.transTarget = "restart";
+          this.transition = { phase: "out", t: 0 };
+        }
+        break;
+    }
+  }
+
+  // 균열의 문: 체크포인트 직전 웨이브를 클리어하면 문이 열리고, 들어가야 다음 스테이지로
+  gate: { x: number; z: number } | null = null;
+  transition: { phase: "out" | "in"; t: number } | null = null;
+  static readonly TRANS_T = 38; // 페이드 아웃/인 길이(틱)
+
+  /** 화면 페이드 알파 (0=없음, 1=완전 검정) — 렌더에서 사용 */
+  get fadeAlpha(): number {
+    if (!this.transition) return 0;
+    const p = Math.min(1, this.transition.t / World.TRANS_T);
+    return this.transition.phase === "out" ? p : 1 - p;
+  }
+
   // 체크포인트·포션: 죽으면 마지막 체크포인트부터, 포션은 H키로 마신다
   static readonly POTION_START = 3;
   static readonly POTION_MAX = 5;
@@ -207,6 +292,8 @@ export class World implements Arena {
     this.zones = [];
     this.fx = [];
     this.drops = [];
+    this.gate = null;
+    this.transition = null;
     this.betweenT = 0;
     this.player.hp = this.player.maxHp;
     this.player.mp = this.player.maxMp;
@@ -353,6 +440,34 @@ export class World implements Arena {
       return;
     }
 
+    // 균열의 문 통과 전환: 페이드아웃 → 다음 웨이브 + 왼쪽 입장 → 페이드인
+    if (this.transition) {
+      this.transition.t++;
+      if (this.transition.phase === "out" && this.transition.t >= World.TRANS_T) {
+        this.gate = null;
+        if (this.transTarget === "restart") {
+          // 튜토리얼 종료 → 본게임 1웨이브
+          this.transTarget = "next";
+          this.tutorialStep = -1;
+          this.jumpToWave(1);
+        } else {
+          this.nextWave();
+        }
+        // 새 지역에 왼쪽에서 걸어 들어온 듯이
+        this.player.x = 160;
+        this.player.z = 70;
+        this.player.vx = 0;
+        this.player.vz = 0;
+        this.transition = { phase: "in", t: 0 };
+      } else if (this.transition.phase === "in" && this.transition.t >= World.TRANS_T) {
+        this.transition = null;
+      }
+      this.particles.update();
+      this.cam.follow(this.player.x);
+      this.cam.update();
+      return;
+    }
+
     // 히트스톱: 시뮬 정지, 이펙트만 진행
     if (this.freezeT > 0) {
       this.freezeT--;
@@ -393,12 +508,39 @@ export class World implements Arena {
     // 사망 처리 / 정리
     this.cleanup();
 
-    // 웨이브 진행
-    if (this.aliveEnemies().length === 0 && this.result === "playing") {
-      if (this.betweenT <= 0) this.betweenT = 90;
-      else {
-        this.betweenT--;
-        if (this.betweenT === 0) this.nextWave();
+    // 튜토리얼 중엔 단계 진행만 (웨이브·문 비활성)
+    if (this.tutorialStep >= 0) {
+      this.updateTutorial();
+    }
+
+    // 웨이브 진행 — 다음 웨이브가 체크포인트(새 스테이지)면 균열의 문을 세우고 통과를 기다린다
+    if (this.tutorialStep < 0 && this.aliveEnemies().length === 0 && this.result === "playing") {
+      const nextIsCheckpoint = (this.wave % 10) % 3 === 0;
+      if (nextIsCheckpoint) {
+        if (!this.gate) {
+          this.gate = { x: clamp(this.player.x + 360, 140, STAGE_LEN - 90), z: 80 };
+          const ggy = groundY(this.gate.z);
+          this.particles.ring(this.gate.x, ggy - 46, "rgba(120,220,255,0.9)", 22, 12, 44);
+          this.particles.glow(this.gate.x, ggy - 46, "rgba(120,220,255,0.6)", 80, 22);
+          this.particles.spark(this.gate.x, ggy - 50, 18, "#7ce7ff", 9);
+          this.particles.text(this.gate.x, ggy - 110, "균열의 문", "#7ce7ff", 1.3);
+          sfx.checkpoint();
+        } else if (
+          !this.player.dead &&
+          this.player.air < 30 &&
+          beltHit(this.gate.x, this.gate.z, this.player.x, this.player.z, 38, 46)
+        ) {
+          this.transition = { phase: "out", t: 0 };
+          const ggy = groundY(this.gate.z);
+          this.particles.glow(this.gate.x, ggy - 46, "rgba(200,245,255,0.9)", 90, 18);
+          sfx.dash();
+        }
+      } else {
+        if (this.betweenT <= 0) this.betweenT = 90;
+        else {
+          this.betweenT--;
+          if (this.betweenT === 0) this.nextWave();
+        }
       }
     }
 

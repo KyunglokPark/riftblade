@@ -173,6 +173,55 @@ export function drawHud(ctx: CanvasRenderingContext2D, w: World) {
     }
   }
 
+  // 튜토리얼 안내
+  if (w.tutorialStep >= 0) {
+    const cls = p.cls;
+    const dashTxt = cls === "mage" ? "L / Shift — 점멸로 순간이동해보자" : "L / Shift — 대시 (짧은 무적!)";
+    const atkTxt =
+      cls === "knight" ? "J — 검격! 연타하면 콤보" : cls === "archer" ? "J — 화살 발사!" : "J — 매직볼트 발사!";
+    const skillTxt =
+      cls === "knight" ? "U — 스킬 '파열참' 사용 (MP 소모)" : cls === "archer" ? "U — 스킬 '관통사격' 사용 (MP 소모)" : "U — 스킬 '화염구' 사용 (MP 소모)";
+    const MSG = [
+      "←→↑↓ / WASD — 자유롭게 움직여보자",
+      "K / Space — 점프",
+      dashTxt,
+      atkTxt + "  — 허수아비를 처치하라",
+      skillTxt,
+      "튜토리얼 완료! 균열로 향한다...",
+    ];
+    const msg = MSG[Math.min(w.tutorialStep, MSG.length - 1)];
+    ctx.save();
+    ctx.textAlign = "center";
+    // 단계 표시
+    if (w.tutorialStep < 5) {
+      ctx.fillStyle = "rgba(200,230,255,0.7)";
+      ctx.font = "700 14px 'Segoe UI', sans-serif";
+      ctx.fillText(`튜토리얼 ${w.tutorialStep + 1} / 5`, VW / 2, 150);
+    }
+    ctx.globalAlpha = 0.85 + Math.sin(w.timeMs * 0.006) * 0.15;
+    ctx.fillStyle = "#ffd76a";
+    ctx.font = "800 24px 'Segoe UI', sans-serif";
+    ctx.strokeStyle = "rgba(0,0,0,0.65)";
+    ctx.lineWidth = 5;
+    ctx.strokeText(msg, VW / 2, 185);
+    ctx.fillText(msg, VW / 2, 185);
+    ctx.restore();
+  }
+
+  // 균열의 문 안내
+  if (w.gate && !w.transition) {
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.globalAlpha = 0.75 + Math.sin(w.timeMs * 0.008) * 0.25;
+    ctx.fillStyle = "#7ce7ff";
+    ctx.font = "800 20px 'Segoe UI', sans-serif";
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.lineWidth = 4;
+    ctx.strokeText("균열의 문이 열렸다 — 문으로 들어가라", VW / 2, 190);
+    ctx.fillText("균열의 문이 열렸다 — 문으로 들어가라", VW / 2, 190);
+    ctx.restore();
+  }
+
   // 웨이브 배너
   if (w.bannerT > 0) {
     const a = Math.min(1, w.bannerT / 40) * Math.min(1, (150 - w.bannerT) / 20 + 0.2);

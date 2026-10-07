@@ -563,7 +563,8 @@ export class Player extends Fighter {
     this.t = 0;
     if (this.cls === "archer" || this.cls === "mage") {
       this.vx *= 0.5;
-      sfx.skill();
+      // 법사 화염벽은 시전음 생략 — 벽이 생길 때 fire_wall 소리가 메인
+      if (this.cls === "archer") sfx.skill();
       return;
     }
     this.slammed = false;

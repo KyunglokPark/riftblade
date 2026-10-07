@@ -56,6 +56,9 @@ const heroDeathKneel = loadSpr("/sprites/hero_death_kneel.png");
 const heroDeathLying = loadSpr("/sprites/hero_death_lying.png");
 // 화염벽 장판 프레임 (Pixellab pixflux, 96x96 투명배경 — 발 89행, 중심 47열)
 const firewallSpr = [0, 1, 2].map((i) => loadSpr(`/sprites/firewall_${i}.png`));
+// 균열의 문 (96x96, 발 92행·중심 47열) — 스테이지 전환 게이트
+const gateSpr = loadSpr("/sprites/gate.png");
+
 // 스킬 이펙트 스프라이트 (96x96 투명배경, 중심 기준 그림)
 const fxSpr: Record<string, Spr> = {};
 for (const n of ["fx_riftslash", "fx_skyslash", "fx_riftnova", "fx_pierce", "fx_arrowrain", "fx_explosion", "fx_fireball", "fx_arcanestorm", "fx_arrow", "fx_magicbolt"]) {
@@ -1401,6 +1404,30 @@ export function drawScene(ctx: CanvasRenderingContext2D, w: World) {
   ctx.translate(0, camY);
   const widx = (w.wave - 1) % 10;
   drawBackground(ctx, camX, Math.floor((w.wave - 1) / 10), widx < 3 ? 0 : widx < 6 ? 1 : 2);
+
+  // 균열의 문 (캐릭터 뒤에)
+  if (w.gate && gateSpr.ready) {
+    const gx = w.gate.x - camX;
+    const ggy = groundY(w.gate.z);
+    const pulse = 0.85 + Math.sin(w.timeMs * 0.004) * 0.15;
+    // 바닥 글로우
+    ctx.save();
+    ctx.globalAlpha = 0.35 * pulse;
+    const gl = ctx.createRadialGradient(gx, ggy - 50, 8, gx, ggy - 50, 80);
+    gl.addColorStop(0, "rgba(120,220,255,0.9)");
+    gl.addColorStop(1, "rgba(120,220,255,0)");
+    ctx.fillStyle = gl;
+    ctx.fillRect(gx - 80, ggy - 130, 160, 150);
+    ctx.restore();
+    const S = 1.5;
+    ctx.drawImage(gateSpr.img, gx - 47 * S, ggy - 92 * S, 96 * S, 96 * S);
+    // 입장 힌트 화살표 (둥실)
+    const bob = Math.sin(w.timeMs * 0.006) * 5;
+    ctx.fillStyle = "#7ce7ff";
+    ctx.font = "900 20px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("▼", gx, ggy - 92 * S - 14 + bob);
+  }
 
   // 깊이 정렬: 뒤(z 큼) 먼저
   const ents: Fighter[] = [w.player, ...w.enemies];

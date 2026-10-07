@@ -40,14 +40,18 @@ async function loadSfxFiles() {
   if (!ctx || sfxLoadStarted) return;
   sfxLoadStarted = true;
   for (const name of SFX_NAMES) {
-    try {
-      const res = await fetch(`/audio/sfx/${name}.mp3`);
-      const type = res.headers.get("content-type") || "";
-      if (!res.ok || !type.startsWith("audio")) continue;
-      const buf = await res.arrayBuffer();
-      sfxBuffers[name] = await ctx.decodeAudioData(buf);
-    } catch {
-      /* 없음 — 신스 사용 */
+    // mp3 우선, 없으면 wav (자체 렌더링 효과음)
+    for (const ext of ["mp3", "wav"]) {
+      try {
+        const res = await fetch(`/audio/sfx/${name}.${ext}`);
+        const type = res.headers.get("content-type") || "";
+        if (!res.ok || !type.startsWith("audio")) continue;
+        const buf = await res.arrayBuffer();
+        sfxBuffers[name] = await ctx.decodeAudioData(buf);
+        break;
+      } catch {
+        /* 없음 — 다음 확장자/신스 */
+      }
     }
   }
 }
@@ -79,6 +83,14 @@ export function toggleMute(): boolean {
   enabled = !enabled;
   if (master) master.gain.value = enabled ? 0.5 : 0;
   return enabled;
+}
+
+// 음악만 끄기 (효과음은 유지) — 뮤직 버스 게인 토글
+let musicOn = true;
+export function toggleMusic(): boolean {
+  musicOn = !musicOn;
+  if (musicBus) musicBus.gain.value = musicOn ? 0.42 : 0;
+  return musicOn;
 }
 
 function now(): number {
