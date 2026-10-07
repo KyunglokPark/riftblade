@@ -185,7 +185,7 @@ export class Enemy extends Fighter {
     if (this.isBoss && !this.phase2 && this.hp < this.maxHp * 0.5) {
       this.phase2 = true;
       this.telegraph = 1;
-      sfx.bossRoar();
+      sfx.bossRoar(this.kind as "boss" | "boss2" | "boss3");
       arena.cam.shake(16);
     }
 

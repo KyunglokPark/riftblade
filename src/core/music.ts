@@ -3,7 +3,13 @@
 
 import { audioNodes, setAudioReady } from "./audio";
 
-export type MusicName = "canyon" | "ember" | "void" | "boss" | null;
+export type MusicName = "canyon" | "ember" | "void" | "boss" | "boss2" | "title" | null;
+
+// 파일이 없을 때 대신 재생할 칩튠 패턴 (title/boss2는 전용 칩튠이 없다)
+const CHIP_FALLBACK: Record<string, "canyon" | "ember" | "void" | "boss"> = {
+  title: "canyon",
+  boss2: "boss",
+};
 
 type Pat = (number | null)[]; // 루트 기준 반음 오프셋, null=쉼표
 type DrumPat = ("k" | "s" | "h" | null)[];
@@ -20,7 +26,7 @@ interface Song {
 const st = (semi: number) => Math.pow(2, semi / 12); // 반음 → 배율
 
 // ---- 작곡 (32스텝 = 16분음표 2마디 루프) ----
-const SONGS: Record<Exclude<MusicName, null>, Song> = {
+const SONGS: Record<"canyon" | "ember" | "void" | "boss", Song> = {
   // 균열 협곡: 신비롭고 차분한 Am — 느린 맥동 베이스 + 성긴 선율
   canyon: {
     bpm: 96,
@@ -66,11 +72,13 @@ let timer: number | undefined;
 // 트랙마다 개별 게인 노드를 달아 1.3초 크로스페이드로 전환한다. (뮤트는 공용 뮤직 버스)
 const FADE = 1.3; // 크로스페이드 시간(초)
 const fileTracks: Partial<Record<Exclude<MusicName, null>, HTMLAudioElement>> = {};
+// 원샷 징글 (루프 없음): 보스 격파 팡파레, 사망 스팅
+const jingleTracks: Partial<Record<"victory" | "death", HTMLAudioElement>> = {};
 const fileGains = new Map<HTMLAudioElement, GainNode>();
 let activeFile: HTMLAudioElement | null = null;
 
 async function probeFileTracks() {
-  for (const name of ["canyon", "ember", "void", "boss"] as const) {
+  for (const name of ["canyon", "ember", "void", "boss", "boss2", "title"] as const) {
     try {
       const res = await fetch(`/audio/${name}.mp3`, { method: "HEAD" });
       const type = res.headers.get("content-type") || "";
@@ -84,8 +92,29 @@ async function probeFileTracks() {
       /* 없음 — 칩튠 사용 */
     }
   }
+  for (const name of ["victory", "death"] as const) {
+    try {
+      const res = await fetch(`/audio/${name}.mp3`, { method: "HEAD" });
+      const type = res.headers.get("content-type") || "";
+      if (res.ok && type.startsWith("audio")) {
+        const el = new Audio(`/audio/${name}.mp3`);
+        el.loop = false;
+        el.preload = "auto";
+        jingleTracks[name] = el;
+      }
+    } catch {
+      /* 없음 */
+    }
+  }
 }
-void probeFileTracks();
+void probeFileTracks().then(() => {
+  // 프로브가 곡 시작보다 늦게 끝난 경우 — 파일 트랙으로 다시 전환
+  if (current && fileTracks[current] && activeFile !== fileTracks[current]) {
+    const c = current;
+    current = null;
+    playMusic(c);
+  }
+});
 
 function hookFileTrack(el: HTMLAudioElement): GainNode | null {
   const got = fileGains.get(el);
@@ -123,7 +152,10 @@ function fadeInTrack(el: HTMLAudioElement) {
   if (!nodes || !g) return;
   if (el.paused) {
     el.currentTime = 0;
-    void el.play().catch(() => {});
+    el.play().catch(() => {
+      // 자동재생 차단 등으로 거부되면 현재 곡을 초기화 — 메인 루프가 다음 틱에 재시도
+      current = null;
+    });
   }
   const t = nodes.ctx.currentTime;
   g.gain.cancelScheduledValues(t);
@@ -224,7 +256,8 @@ function scheduleStep(song: Song, i: number, t: number, stepDur: number) {
 function tick() {
   const nodes = audioNodes();
   if (!nodes || !current) return;
-  const song = SONGS[current];
+  if (nodes.ctx.state === "suspended") void nodes.ctx.resume();
+  const song = SONGS[(current in SONGS ? current : CHIP_FALLBACK[current] ?? "canyon") as keyof typeof SONGS];
   const stepDur = 60 / song.bpm / 4;
   const now = nodes.ctx.currentTime;
   if (nextT < now) nextT = now + 0.05; // 탭 비활성 등으로 밀렸으면 재정렬
@@ -282,6 +315,22 @@ export function playMusic(name: MusicName) {
 
 export function stopMusic() {
   playMusic(null);
+}
+
+/** 원샷 징글: 보스 격파 팡파레 / 사망 스팅 (파일 없으면 무음) */
+export function playJingle(name: "victory" | "death") {
+  const el = jingleTracks[name];
+  if (!el) return;
+  const g = hookFileTrack(el);
+  if (!g) return;
+  const nodes = audioNodes();
+  if (nodes) {
+    const t = nodes.ctx.currentTime;
+    g.gain.cancelScheduledValues(t);
+    g.gain.setValueAtTime(1, t);
+  }
+  el.currentTime = 0;
+  void el.play().catch(() => {});
 }
 
 // 오디오 컨텍스트가 뜨면(첫 키/클릭) 대기 중이던 곡 시작

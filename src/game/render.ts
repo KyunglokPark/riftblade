@@ -83,6 +83,10 @@ const RANGED_HERO = {
     baseA: { cx: 33, foot: 63 },
     walkA: { cx: 33, foot: 63 },
     atkA: { cx: 42, foot: 71 },
+    deathK: loadSpr("/sprites/archer_death_kneel.png"),
+    deathL: loadSpr("/sprites/archer_death_lying.png"),
+    deathKA: { cx: 43, foot: 74 },
+    deathLA: { cx: 40, foot: 75 },
   },
   mage: {
     base: loadSpr("/sprites/mage.png"),
@@ -92,6 +96,10 @@ const RANGED_HERO = {
     baseA: { cx: 31, foot: 61 },
     walkA: { cx: 33, foot: 61 },
     atkA: { cx: 42, foot: 69 },
+    deathK: loadSpr("/sprites/mage_death_kneel.png"),
+    deathL: loadSpr("/sprites/mage_death_lying.png"),
+    deathKA: { cx: 36, foot: 68 },
+    deathLA: { cx: 41, foot: 71 },
   },
 };
 
@@ -473,18 +481,30 @@ function drawRangedHero(ctx: CanvasRenderingContext2D, p: Player, camX: number) 
   let img: CanvasImageSource = flash && spr.white ? spr.white : spr.img;
   let alpha = 1;
 
-  // 사망: 뒤로 무너지는 회전 연출
+  // 사망: 키포즈 2장 — 무릎 꿇기 → 완전히 쓰러짐 (로딩 전엔 회전 폴백)
   if (p.dead) {
-    const dp = Math.min(1, p.deathT / 44);
-    const ease = 1 - (1 - dp) * (1 - dp);
-    lean = -f * ease * 1.45;
-    sxs = 1;
-    sys = 1 - ease * 0.15;
-    alpha = Math.max(0.55, 1 - Math.max(0, p.deathT - 20) * 0.004);
-    spr = set.base;
-    a = set.baseA;
-    size = 64;
-    img = flash && spr.white ? spr.white : spr.img;
+    if (set.deathK.ready && set.deathL.ready) {
+      const lying = p.deathT > 40;
+      spr = lying ? set.deathL : set.deathK;
+      a = lying ? set.deathLA : set.deathKA;
+      size = 80;
+      lean = 0;
+      sxs = 1;
+      sys = 1;
+      alpha = Math.max(0.65, 1 - Math.max(0, p.deathT - 40) * 0.003);
+      img = flash && spr.white ? spr.white : spr.img;
+    } else {
+      const dp = Math.min(1, p.deathT / 44);
+      const ease = 1 - (1 - dp) * (1 - dp);
+      lean = -f * ease * 1.45;
+      sxs = 1;
+      sys = 1 - ease * 0.15;
+      alpha = Math.max(0.55, 1 - Math.max(0, p.deathT - 20) * 0.004);
+      spr = set.base;
+      a = set.baseA;
+      size = 64;
+      img = flash && spr.white ? spr.white : spr.img;
+    }
   }
 
   ctx.save();

@@ -511,7 +511,7 @@ export class Player extends Fighter {
           h: this.air + 30,
           sprite: "fx_fireball",
         });
-        sfx.nova();
+        sfx.fireball();
         arena.particles.glow(this.x + this.facing * 30, groundY(this.z) - this.air - 30, "rgba(255,176,96,0.6)", 34, 10);
       }
       if (this.t >= 30) this.state = "idle";

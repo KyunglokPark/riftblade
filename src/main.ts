@@ -3,7 +3,7 @@
 import "./style.css";
 import { initInput, pressed, endInputFrame } from "./core/input";
 import { initAudio, sfx, toggleMute } from "./core/audio";
-import { playMusic, stopMusic } from "./core/music";
+import { playMusic, stopMusic, playJingle } from "./core/music";
 import { World } from "./game/world";
 import type { PlayerClass } from "./game/player";
 import { drawScene, drawBackground } from "./game/render";
@@ -113,7 +113,7 @@ function tick() {
   titleT++;
   if (muteMsgT > 0) muteMsgT--;
   // 상태별 BGM
-  if (state === "title" || state === "select") playMusic("canyon");
+  if (state === "title" || state === "select") playMusic("title");
   else if (state === "play" || state === "pause") playMusic(world.musicTheme());
   else if (state === "lose") stopMusic(); // YOU DIED는 정적 속에서
   if (state === "title") {
@@ -168,6 +168,7 @@ function tick() {
   } else if (world.result === "lose") {
     state = "lose";
     loseT = 0;
+    playJingle("death"); // YOU DIED 스팅 — BGM은 페이드아웃
   }
 }
 

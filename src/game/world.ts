@@ -8,6 +8,7 @@ import { Camera } from "../core/camera";
 import { sfx } from "../core/audio";
 import { beltHit, groundY, rand, clamp, VW, STAGE_LEN } from "../core/util";
 import { pressed } from "../core/input";
+import { playJingle } from "../core/music";
 
 export interface Drop {
   x: number;
@@ -259,7 +260,7 @@ export class World implements Arena {
         if (kind.startsWith("boss")) {
           e.x = clamp(px + (px < STAGE_LEN / 2 ? 420 : -420), 80, STAGE_LEN - 80);
           e.z = 80;
-          sfx.bossRoar();
+          sfx.bossRoar(kind as "boss" | "boss2" | "boss3");
         }
         this.enemies.push(e);
       }
@@ -280,9 +281,9 @@ export class World implements Arena {
   }
 
   /** 현재 상황에 맞는 BGM 테마 (보스 생존 시 보스 테마 우선) */
-  musicTheme(): "canyon" | "ember" | "void" | "boss" {
+  musicTheme(): "canyon" | "ember" | "void" | "boss" | "boss2" {
     const bossAlive = this.enemies.some((e) => !e.dead && e instanceof Enemy && e.isBoss);
-    if (bossAlive) return "boss";
+    if (bossAlive) return this.wave > 10 ? "boss2" : "boss"; // 2주기부터 강화 보스 테마
     const widx = (this.wave - 1) % 10;
     return widx < 3 ? "canyon" : widx < 6 ? "ember" : "void";
   }
@@ -569,7 +570,7 @@ export class World implements Arena {
       dead: false,
     });
     if (kind === "rain") sfx.launch();
-    else sfx.nova();
+    else sfx.fireWall();
   }
 
   private updateZones() {
@@ -839,6 +840,7 @@ export class World implements Arena {
       // 주기 보스 격퇴 — 승리 종료 대신 연출 후 다음 주기로 계속
       this.slowmo(50, 0.4);
       this.freeze(16);
+      playJingle("victory"); // 팡파레 (파일 없으면 칩튠 승리음)
       sfx.win();
     }
   }
