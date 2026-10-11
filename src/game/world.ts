@@ -163,9 +163,9 @@ export class World implements Arena {
         }
         break;
       case 3:
-        if (this.enemies.length > 0 && this.aliveEnemies().length === 0) {
+        // 허수아비 처치: 죽은 적은 cleanup()이 즉시 배열에서 제거하므로 "비었는가"로 판정
+        if (this.enemies.length === 0) {
           this.tutAdvance();
-          this.enemies = [];
           this.spawnDummy(-240);
         }
         break;
