@@ -4,7 +4,7 @@ import type { World } from "./world";
 import { Enemy } from "./enemy";
 import { Player } from "./player";
 import { Fighter } from "./fighter";
-import { groundY, depthScale, VW, VH, ZMAX, GROUND_BACK, GROUND_FRONT } from "../core/util";
+import { groundY, depthScale, VW, VH, ZMAX, GROUND_BACK, GROUND_FRONT, asset } from "../core/util";
 
 // ---- 스프라이트 (Pixellab 에셋) 로더 ----
 const SPRITE_SCALE = 1.2;
@@ -35,7 +35,7 @@ function loadSpr(src: string): Spr {
     s.red = tintCanvas(s.img, "#ff6a6a");
     s.yellow = tintCanvas(s.img, "#ffd76a");
   };
-  s.img.src = src;
+  s.img.src = asset(src);
   return s;
 }
 
@@ -255,7 +255,7 @@ function capsule(
 function loadBg(src: string) {
   const o = { img: new Image(), ready: false };
   o.img.onload = () => (o.ready = true);
-  o.img.src = src;
+  o.img.src = asset(src);
   return o;
 }
 const bgFars = [loadBg("/sprites/bg_rift.png"), loadBg("/sprites/bg_ember.png"), loadBg("/sprites/bg_void.png")];
@@ -263,7 +263,7 @@ const bgFars = [loadBg("/sprites/bg_rift.png"), loadBg("/sprites/bg_ember.png"),
 const bgMid = new Image();
 let bgMidReady = false;
 bgMid.onload = () => (bgMidReady = true);
-bgMid.src = "/sprites/bg_temple.png";
+bgMid.src = asset("/sprites/bg_temple.png");
 
 export function drawBackground(ctx: CanvasRenderingContext2D, camX: number, cycle = 0, stage = 0) {
   const far = bgFars[stage]?.ready ? bgFars[stage].img : bgFars[0].ready ? bgFars[0].img : null;

@@ -8,7 +8,7 @@ import { World } from "./game/world";
 import type { PlayerClass } from "./game/player";
 import { drawScene, drawBackground } from "./game/render";
 import { drawHud } from "./game/hud";
-import { VW, VH } from "./core/util";
+import { VW, VH, asset } from "./core/util";
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
@@ -39,7 +39,7 @@ interface ClassCard {
 }
 function cardImg(src: string) {
   const i = new Image();
-  i.src = src;
+  i.src = asset(src);
   return i;
 }
 const CLASS_CARDS: ClassCard[] = [

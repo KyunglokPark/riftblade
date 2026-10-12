@@ -1,3 +1,8 @@
+// 에셋 경로: GitHub Pages 등 하위 경로 배포 대응 — "/sprites/x.png" → "<base>/sprites/x.png"
+export function asset(path: string): string {
+  return import.meta.env.BASE_URL + path.replace(/^\//, "");
+}
+
 // 공용 상수 · 수학 유틸
 
 export const VW = 960;

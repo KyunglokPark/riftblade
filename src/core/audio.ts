@@ -1,5 +1,7 @@
 // 절차적 효과음 (WebAudio) — 외부 파일 없이 코드로 생성.
 
+import { asset } from "./util";
+
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let musicBus: GainNode | null = null; // BGM 전용 버스 (볼륨 분리)
@@ -43,7 +45,7 @@ async function loadSfxFiles() {
     // mp3 우선, 없으면 wav (자체 렌더링 효과음)
     for (const ext of ["mp3", "wav"]) {
       try {
-        const res = await fetch(`/audio/sfx/${name}.${ext}`);
+        const res = await fetch(asset(`/audio/sfx/${name}.${ext}`));
         const type = res.headers.get("content-type") || "";
         if (!res.ok || !type.startsWith("audio")) continue;
         const buf = await res.arrayBuffer();

@@ -2,6 +2,7 @@
 // 룩어헤드 스케줄링: 90ms 간격 타이머가 0.25초 앞까지 노트를 예약해 타이밍이 정확하다.
 
 import { audioNodes, setAudioReady } from "./audio";
+import { asset } from "./util";
 
 export type MusicName = "canyon" | "ember" | "void" | "boss" | "boss2" | "title" | null;
 
@@ -80,10 +81,10 @@ let activeFile: HTMLAudioElement | null = null;
 async function probeFileTracks() {
   for (const name of ["canyon", "ember", "void", "boss", "boss2", "title"] as const) {
     try {
-      const res = await fetch(`/audio/${name}.mp3`, { method: "HEAD" });
+      const res = await fetch(asset(`/audio/${name}.mp3`), { method: "HEAD" });
       const type = res.headers.get("content-type") || "";
       if (res.ok && type.startsWith("audio")) {
-        const el = new Audio(`/audio/${name}.mp3`);
+        const el = new Audio(asset(`/audio/${name}.mp3`));
         el.loop = true;
         el.preload = "auto";
         fileTracks[name] = el;
@@ -94,10 +95,10 @@ async function probeFileTracks() {
   }
   for (const name of ["victory", "death"] as const) {
     try {
-      const res = await fetch(`/audio/${name}.mp3`, { method: "HEAD" });
+      const res = await fetch(asset(`/audio/${name}.mp3`), { method: "HEAD" });
       const type = res.headers.get("content-type") || "";
       if (res.ok && type.startsWith("audio")) {
-        const el = new Audio(`/audio/${name}.mp3`);
+        const el = new Audio(asset(`/audio/${name}.mp3`));
         el.loop = false;
         el.preload = "auto";
         jingleTracks[name] = el;
